@@ -33,8 +33,11 @@ async function proxy(request: NextRequest, context: RouteContext): Promise<Respo
   const accessToken = token !== null && typeof token.accessToken === 'string' ? token.accessToken : undefined
   if (accessToken === undefined) return Response.json({ code: 'AUTH_REQUIRED', message: '需要有效的后台 Session' }, { status: 401 })
   const { path } = await context.params
-  const suffix = path.map(segment => encodeURIComponent(segment)).join('/')
-  const target = `${baseUrl}/${suffix}${request.nextUrl.search}`
+  const useV3MemoryRoute = path[0] === 'v3' && path[1] === 'project-memory'
+  const upstreamBase = useV3MemoryRoute ? baseUrl.replace(/\/v1\/?$/u, '/v3') : baseUrl
+  const upstreamPath = useV3MemoryRoute ? path.slice(1) : path
+  const suffix = upstreamPath.map(segment => encodeURIComponent(segment)).join('/')
+  const target = `${upstreamBase}/${suffix}${request.nextUrl.search}`
   const headers = new Headers(request.headers)
   headers.delete('cookie')
   headers.delete('host')

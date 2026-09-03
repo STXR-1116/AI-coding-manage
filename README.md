@@ -19,6 +19,8 @@
 
 知识库管理页支持组织范围列表、`document`/`faq`/`wiki` 三种类型创建、基础配置、Markdown/URL/文件描述导入、异步操作状态轮询、文档重解析/删除和删除影响确认。FAQ、Wiki、图谱、项目和审计页签目前只呈现服务端能力说明；文件夹/标签 CRUD、FAQ/Wiki 条目编辑、真实图谱数据、项目关联操作和知识库审计查询尚未接入页面。
 
+记忆库管理页按当前项目提供服务端权威的记忆列表、关键词搜索、详情、正文编辑、删除、项目范围调整、召回策略、处理任务和治理审计。编辑、删除、范围调整、策略更新和任务重试使用 `If-Match`、`expected_revision` 与 `Idempotency-Key`；成员只能操作自己的捕获记录，manager/admin 的管理范围由服务端重新鉴权，页面不会以本地状态冒充成功。
+
 ## 目录结构
 
 ```text
@@ -29,7 +31,7 @@ src/app/api/session/route.ts              # 会话读取
 src/app/api/team-skill/[...path]/route.ts # 同源服务 API 代理
 src/auth.ts                               # Credentials 登录与令牌刷新
 src/auth-session.ts                       # Refresh Token 轮换解析
-src/components/admin-dashboard.tsx       # 菜单、项目/知识库页面、项目页签及其他 Skill 管理页面
+src/components/admin-dashboard.tsx       # 菜单、项目/知识库/记忆库页面、项目页签及其他 Skill 管理页面
 src/lib/team-skill-api.ts                 # 类型化 REST 客户端
 src/lib/team-skill-types.ts               # 服务响应和项目模型
 tests/                                    # API、路由和组件测试

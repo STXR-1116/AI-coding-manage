@@ -189,10 +189,72 @@ export interface AdminKnowledgeOperation {
 export interface AdminKnowledgeDeleteImpact {
   readonly knowledge_base_id: string
   readonly revision: number
-  readonly affected_projects: readonly { readonly project_id: string; readonly name: string; readonly status: 'draft' | 'active' | 'archived' }[]
+  readonly affected_projects: readonly {
+    readonly project_id: string
+    readonly name: string
+    readonly status: 'draft' | 'active' | 'archived'
+  }[]
 }
 
 export interface AdminKnowledgeGraph {
   readonly nodes: readonly Record<string, unknown>[]
   readonly relations: readonly Record<string, unknown>[]
+}
+
+export interface AdminMemoryRecord {
+  readonly memory_id: string
+  readonly team_id: string
+  readonly project_id: string
+  readonly content: string
+  readonly layer: 'L1'
+  readonly captured_by_user_id: string
+  readonly created_at: string
+  readonly updated_at: string
+  readonly revision: number
+  readonly status: 'ACTIVE' | 'DELETED'
+  readonly importance: number
+  readonly recall_count: number
+  readonly last_recalled_at: string | null
+  readonly source_kind: 'agent_turn'
+}
+
+export interface AdminMemoryList {
+  readonly items: readonly AdminMemoryRecord[]
+  readonly next_cursor: string | null
+  readonly total_estimate?: number
+}
+
+export interface AdminMemoryPolicy {
+  readonly scope_type: 'project'
+  readonly scope_id: string
+  readonly revision: number
+  readonly values: { readonly top_k: number; readonly relevance_threshold: number; readonly token_budget: number }
+  readonly inherited_from: 'organization' | null
+}
+
+export interface AdminMemoryJob {
+  readonly job_id: string
+  readonly event_id: string
+  readonly kind: 'CAPTURE' | 'INDEX_REFRESH' | 'DELETE_CLEANUP' | 'SCOPE_MOVED'
+  readonly team_id: string
+  readonly project_id: string
+  readonly requested_by_user_id: string
+  readonly status: 'PENDING' | 'SUCCEEDED' | 'FAILED'
+  readonly retryable: boolean
+  readonly retry_count: number
+  readonly created_at: string
+  readonly finished_at: string | null
+  readonly error_code: string | null
+  readonly revision: number
+}
+
+export interface AdminMemoryAudit {
+  readonly audit_id: string
+  readonly operation: string
+  readonly operated_by_user_id: string
+  readonly role: AccountRole
+  readonly memory_id: string | null
+  readonly project_id: string
+  readonly result: string
+  readonly event_id: string
 }

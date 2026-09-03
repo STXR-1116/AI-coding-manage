@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+/* oxlint-disable typescript/no-base-to-string -- Fetch spy assertions inspect RequestInfo and BodyInit wire values. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
@@ -9,14 +10,24 @@ vi.mock('next-auth/react', () => ({ signIn: vi.fn(), signOut: vi.fn() }))
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
 })
 
 const skill = {
-  skillId: 'skill-1', displayName: '代码评审', summary: '检查代码风险', runtimeName: 'aicp-code-review',
-  category: '质量', tags: ['审核'], currentVersion: '1.0.0', status: 'published' as const,
-  visibility: 'organization' as const, revision: 2, authorName: '申屠相镕', publishedAt: '2026-08-29T08:00:00Z',
+  skillId: 'skill-1',
+  displayName: '代码评审',
+  summary: '检查代码风险',
+  runtimeName: 'aicp-code-review',
+  category: '质量',
+  tags: ['审核'],
+  currentVersion: '1.0.0',
+  status: 'published' as const,
+  visibility: 'organization' as const,
+  revision: 2,
+  authorName: '申屠相镕',
+  publishedAt: '2026-08-29T08:00:00Z',
 }
 
 function response(value: unknown, status = 200): Response {
@@ -33,7 +44,9 @@ describe('AdminDashboard', () => {
   it('clears a stale Auth.js session before accepting credentials', async () => {
     render(React.createElement(AdminLoginPage, { clearStaleSession: true }))
 
-    await waitFor(() => expect(signOut).toHaveBeenCalledWith({ redirect: false }))
+    await waitFor(() => {
+      expect(signOut).toHaveBeenCalledWith({ redirect: false })
+    })
   })
 
   it('renders Skill pages under a second-level module and reserves future modules', async () => {
@@ -53,19 +66,308 @@ describe('AdminDashboard', () => {
   })
 
   it('shows the knowledge-base management page for an authenticated administrator', async () => {
-    const fetcher = vi.fn<typeof fetch>(async input => String(input).includes('knowledge-bases') ? response({ items: [{ knowledge_base_id: 'k-1', organization_id: 'org-alpha', name: '发布流程', description: '发布规范', type: 'document', state: 'active', searchable: true, updated_at: '2026-09-02T00:00:00Z', revision: 1 }] }) : response([]))
+    const fetcher = vi.fn<typeof fetch>(async input =>
+      String(input).includes('knowledge-bases')
+        ? response({
+          items: [
+            {
+              knowledge_base_id: 'k-1',
+              organization_id: 'org-alpha',
+              name: '发布流程',
+              description: '发布规范',
+              type: 'document',
+              state: 'active',
+              searchable: true,
+              updated_at: '2026-09-02T00:00:00Z',
+              revision: 1,
+            },
+          ],
+        })
+        : response([]),
+    )
     configure(fetcher)
-    render(React.createElement(AdminDashboard, { session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false } }))
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
     fireEvent.click(screen.getByRole('button', { name: /知识库管理/ }))
     fireEvent.click(await screen.findByRole('button', { name: /知识库文档、FAQ 与 Wiki/ }))
     expect(await screen.findByRole('heading', { name: '知识库' })).toBeTruthy()
     expect(screen.getByText('发布流程')).toBeTruthy()
   })
 
+  it('manages project memories with server filtering, revision editing, and governance tabs', async () => {
+    const memory = {
+      memory_id: 'm-1',
+      team_id: 'team-alpha',
+      project_id: 'project-alpha',
+      content: 'Alpha uses strict TypeScript checks.',
+      layer: 'L1',
+      captured_by_user_id: 'member-1',
+      created_at: '2026-09-02T00:00:00Z',
+      updated_at: '2026-09-02T00:00:00Z',
+      revision: 1,
+      status: 'ACTIVE',
+      importance: 0.8,
+      recall_count: 0,
+      last_recalled_at: null,
+      source_kind: 'agent_turn',
+    }
+    const fetcher = vi.fn<typeof fetch>(async (input, _init) => {
+      const url = String(input)
+      if (url.endsWith('/admin/projects'))
+        return response({
+          items: [{ project_id: 'project-alpha', organization_id: 'org-alpha', name: '协作台前端', status: 'active', revision: 1 }],
+        })
+      if (url.endsWith('/project-memory/list')) return response({ data: { items: [memory], next_cursor: null, total_estimate: 1 } })
+      if (url.endsWith('/project-memory/get')) return response({ data: memory })
+      if (url.endsWith('/project-memory/update'))
+        return response({
+          data: {
+            memory: { ...memory, content: '更新后的项目记忆。', revision: 2 },
+            event_id: 'e-1',
+            job_id: 'j-1',
+            status: 'INDEX_PENDING',
+          },
+        })
+      if (url.endsWith('/project-memory/delete'))
+        return response({ data: { event_id: 'e-2', job_id: 'j-2', cleanup_status: 'PENDING' } }, 202)
+      if (url.endsWith('/project-memory/policy/get'))
+        return response({
+          data: {
+            scope_type: 'project',
+            scope_id: 'project-alpha',
+            revision: 1,
+            values: { top_k: 8, relevance_threshold: 0.4, token_budget: 1200 },
+            inherited_from: 'organization',
+          },
+        })
+      if (url.endsWith('/project-memory/jobs/list')) return response({ data: { items: [] } })
+      if (url.endsWith('/project-memory/audit/list')) return response({ data: { items: [] } })
+      return response({ items: [] })
+    })
+    configure(fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /记忆库管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /记忆列表、策略、任务与审计/ }))
+    expect(await screen.findByText('Alpha uses strict TypeScript checks.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Alpha uses strict TypeScript checks/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑记忆' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '记忆正文' }), { target: { value: '更新后的项目记忆。' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存记忆' }))
+    await waitFor(() => {
+      expect(
+        fetcher.mock.calls.some(
+          ([url, init]) => String(url).endsWith('/project-memory/update') && String(init?.body).includes('更新后的项目记忆'),
+        ),
+      ).toBe(true)
+    })
+    fireEvent.click(screen.getByRole('button', { name: '策略' }))
+    expect(await screen.findByText('记忆召回策略')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '任务' }))
+    expect(await screen.findByText('记忆处理任务')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '审计' }))
+    expect(await screen.findByText('记忆治理审计')).toBeTruthy()
+  })
+
+  it('moves a memory to another authorized project with revision and idempotency', async () => {
+    const memory = {
+      memory_id: 'm-1',
+      team_id: 'team-alpha',
+      project_id: 'project-alpha',
+      content: 'Move this project memory.',
+      layer: 'L1',
+      captured_by_user_id: 'member-1',
+      created_at: '2026-09-02T00:00:00Z',
+      updated_at: '2026-09-02T00:00:00Z',
+      revision: 3,
+      status: 'ACTIVE',
+      importance: 0.8,
+      recall_count: 0,
+      last_recalled_at: null,
+      source_kind: 'agent_turn',
+    }
+    const target = { project_id: 'project-beta', organization_id: 'org-alpha', name: 'Beta 项目', status: 'active', revision: 1 }
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/admin/projects'))
+        return response({
+          items: [{ project_id: 'project-alpha', organization_id: 'org-alpha', name: 'Alpha 项目', status: 'active', revision: 1 }, target],
+        })
+      if (url.endsWith('/project-memory/list')) return response({ data: { items: [memory], next_cursor: null, total_estimate: 1 } })
+      if (url.endsWith('/project-memory/get')) return response({ data: memory })
+      if (url.endsWith('/project-memory/scope/update') && init?.method === 'POST')
+        return response({ data: { memory: { ...memory, project_id: target.project_id, revision: 4 } } })
+      return response({ data: { items: [] } })
+    })
+    configure(fetcher)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /记忆库管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /记忆列表、策略、任务与审计/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Move this project memory/ }))
+    const targetSelect = await screen.findByRole('combobox', { name: '目标项目' })
+    fireEvent.change(targetSelect, { target: { value: 'project-beta' } })
+    fireEvent.click(screen.getByRole('button', { name: '调整项目范围' }))
+    await waitFor(() => {
+      const call = fetcher.mock.calls.find(([url, _init]) => String(url).endsWith('/project-memory/scope/update'))
+      expect(call).toBeDefined()
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        memory_id: 'm-1',
+        target_project_id: 'project-beta',
+        expected_revision: 3,
+      })
+      expect(new Headers(call?.[1]?.headers).get('If-Match')).toBe('3')
+      expect(new Headers(call?.[1]?.headers).get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/u)
+    })
+    expect(await screen.findByText('project-beta')).toBeTruthy()
+  })
+
+  it('shows a forbidden memory response instead of an empty list', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/admin/projects') || url.endsWith('/me/projects'))
+        return response({
+          items: [{ project_id: 'project-alpha', organization_id: 'org-alpha', name: 'Alpha 项目', status: 'active', revision: 1 }],
+        })
+      if (url.endsWith('/project-memory/list')) return response({ code: 'PROJECT_ACCESS_DENIED', message: '当前账号无权访问项目' }, 403)
+      return response([])
+    })
+    configure(fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '管理员' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /记忆库管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /记忆列表、策略、任务与审计/ }))
+    expect(await screen.findByText('PROJECT_ACCESS_DENIED：当前账号无权访问项目')).toBeTruthy()
+    expect(screen.queryByText('当前项目没有可见记忆')).toBeNull()
+  })
+
+  it('shows an unavailable memory response from the service', async () => {
+    const fetcher = vi.fn<typeof fetch>(async input =>
+      String(input).endsWith('/project-memory/list')
+        ? response({ code: 'MEMORY_SERVICE_UNAVAILABLE', message: '记忆服务暂不可用' }, 503)
+        : response({
+          items: [{ project_id: 'project-alpha', organization_id: 'org-alpha', name: 'Alpha 项目', status: 'active', revision: 1 }],
+        }),
+    )
+    configure(fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '管理员' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /记忆库管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /记忆列表、策略、任务与审计/ }))
+    expect(await screen.findByText('MEMORY_SERVICE_UNAVAILABLE：记忆服务暂不可用')).toBeTruthy()
+  })
+
+  it('keeps edited memory content visible after a revision conflict', async () => {
+    const memory = {
+      memory_id: 'm-1',
+      team_id: 'team-alpha',
+      project_id: 'project-alpha',
+      content: '原始记忆',
+      layer: 'L1',
+      captured_by_user_id: 'member-1',
+      created_at: '2026-09-02T00:00:00Z',
+      updated_at: '2026-09-02T00:00:00Z',
+      revision: 1,
+      status: 'ACTIVE',
+      importance: 0.8,
+      recall_count: 0,
+      last_recalled_at: null,
+      source_kind: 'agent_turn',
+    }
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/admin/projects') || url.endsWith('/me/projects'))
+        return response({
+          items: [{ project_id: 'project-alpha', organization_id: 'org-alpha', name: 'Alpha 项目', status: 'active', revision: 1 }],
+        })
+      if (url.endsWith('/project-memory/list') || url.endsWith('/project-memory/get'))
+        return response({ data: url.endsWith('/project-memory/list') ? { items: [memory], next_cursor: null, total_estimate: 1 } : memory })
+      if (url.endsWith('/project-memory/update'))
+        return response({ code: 'MEMORY_REVISION_CONFLICT', message: '记忆已更新，请刷新后重试' }, 409)
+      return response({ items: [] })
+    })
+    configure(fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'member-1', name: '成员' }, role: 'member', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /记忆库管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /记忆列表、策略、任务与审计/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /原始记忆/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑记忆' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '记忆正文' }), { target: { value: '本地未提交修改' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存记忆' }))
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: '记忆正文' }).value).toBe('本地未提交修改')
+    })
+    expect(await screen.findByText('MEMORY_REVISION_CONFLICT：记忆已更新，请刷新后重试')).toBeTruthy()
+  })
+
+  it('resolves a member project before requesting memory records', async () => {
+    const memory = {
+      memory_id: 'm-1',
+      team_id: 'team-alpha',
+      project_id: 'project-alpha',
+      content: '成员项目记忆',
+      layer: 'L1',
+      captured_by_user_id: 'member-1',
+      created_at: '2026-09-02T00:00:00Z',
+      updated_at: '2026-09-02T00:00:00Z',
+      revision: 1,
+      status: 'ACTIVE',
+      importance: 0.8,
+      recall_count: 0,
+      last_recalled_at: null,
+      source_kind: 'agent_turn',
+    }
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/me/projects'))
+        return response({
+          items: [{ project_id: 'project-alpha', organization_id: 'org-alpha', name: 'Alpha 项目', status: 'active', revision: 1 }],
+        })
+      if (url.endsWith('/project-memory/list')) return response({ data: { items: [memory], next_cursor: null, total_estimate: 1 } })
+      if (url.endsWith('/project-memory/get')) return response({ data: memory })
+      return response([])
+    })
+    configure(fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'member-1', name: '成员' }, role: 'member', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /记忆库管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /记忆列表、策略、任务与审计/ }))
+    expect(await screen.findByText('成员项目记忆')).toBeTruthy()
+    const listCall = fetcher.mock.calls.find(([input]) => String(input).endsWith('/project-memory/list'))
+    expect(JSON.parse(String(listCall?.[1]?.body))).toMatchObject({ project_id: 'project-alpha' })
+  })
+
   it('expands only the selected primary navigation menu', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => response([]))
     configure(fetcher)
-    render(React.createElement(AdminDashboard, { session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false } }))
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
 
     const navigation = screen.getByRole('navigation', { name: '管理后台导航' })
     const skillMenu = screen.getByRole('button', { name: /Skill 管理/ })
@@ -106,8 +408,26 @@ describe('AdminDashboard', () => {
   })
 
   it('keeps approval disabled until every review check is complete', async () => {
-    const review = { skill, version: { skillId: skill.skillId, version: '1.1.0', status: 'pending_review' as const, releaseNotes: '新增检查项', dependencies: [], permissions: ['read_file'], validation: [], revision: 1 }, reviewChecks: [{ id: 'check-1', label: '内容与文件' }, { id: 'check-2', label: '依赖与权限' }] }
-    const fetcher = vi.fn<typeof fetch>(async input => String(input).includes('team-skill-reviews') ? response([review]) : response([skill]))
+    const review = {
+      skill,
+      version: {
+        skillId: skill.skillId,
+        version: '1.1.0',
+        status: 'pending_review' as const,
+        releaseNotes: '新增检查项',
+        dependencies: [],
+        permissions: ['read_file'],
+        validation: [],
+        revision: 1,
+      },
+      reviewChecks: [
+        { id: 'check-1', label: '内容与文件' },
+        { id: 'check-2', label: '依赖与权限' },
+      ],
+    }
+    const fetcher = vi.fn<typeof fetch>(async input =>
+      String(input).includes('team-skill-reviews') ? response([review]) : response([skill]),
+    )
     configure(fetcher)
     render(React.createElement(AdminDashboard))
     fireEvent.click(await screen.findByRole('button', { name: /审核队列/ }))
@@ -134,15 +454,35 @@ describe('AdminDashboard', () => {
   it('changes the review details when an administrator selects another pending version', async () => {
     const second = {
       skill: { ...skill, skillId: 'skill-2', displayName: 'API 可靠性检查', currentVersion: undefined, status: 'pending_review' as const },
-      version: { skillId: 'skill-2', version: '0.2.0', status: 'pending_review' as const, releaseNotes: '覆盖超时与重试', dependencies: ['DSH >= 0.1.0'], permissions: ['read_file'], validation: [], revision: 1 },
+      version: {
+        skillId: 'skill-2',
+        version: '0.2.0',
+        status: 'pending_review' as const,
+        releaseNotes: '覆盖超时与重试',
+        dependencies: ['DSH >= 0.1.0'],
+        permissions: ['read_file'],
+        validation: [],
+        revision: 1,
+      },
       reviewChecks: [{ id: 'check-1', label: '内容与文件' }],
     }
     const first = {
       skill: { ...skill, displayName: '代码评审', status: 'pending_review' as const },
-      version: { skillId: skill.skillId, version: '1.1.0', status: 'pending_review' as const, releaseNotes: '覆盖变更边界', dependencies: [], permissions: [], validation: [], revision: 1 },
+      version: {
+        skillId: skill.skillId,
+        version: '1.1.0',
+        status: 'pending_review' as const,
+        releaseNotes: '覆盖变更边界',
+        dependencies: [],
+        permissions: [],
+        validation: [],
+        revision: 1,
+      },
       reviewChecks: [{ id: 'check-1', label: '内容与文件' }],
     }
-    const fetcher = vi.fn<typeof fetch>(async input => String(input).includes('team-skill-reviews') ? response([first, second]) : response([skill]))
+    const fetcher = vi.fn<typeof fetch>(async input =>
+      String(input).includes('team-skill-reviews') ? response([first, second]) : response([skill]),
+    )
     configure(fetcher)
     render(React.createElement(AdminDashboard))
     fireEvent.click(await screen.findByRole('button', { name: /审核队列/ }))
@@ -164,15 +504,32 @@ describe('AdminDashboard', () => {
   })
 
   it('sends a rejection reason for the selected review item', async () => {
-    const review = { skill: { ...skill, status: 'pending_review' as const }, version: { skillId: skill.skillId, version: '1.1.0', status: 'pending_review' as const, releaseNotes: '新增检查', dependencies: [], permissions: [], validation: [], revision: 1 }, reviewChecks: [{ id: 'check-1', label: '内容与文件' }] }
-    const fetcher = vi.fn<typeof fetch>(async input => String(input).includes('team-skill-reviews') ? response([review]) : response([skill]))
+    const review = {
+      skill: { ...skill, status: 'pending_review' as const },
+      version: {
+        skillId: skill.skillId,
+        version: '1.1.0',
+        status: 'pending_review' as const,
+        releaseNotes: '新增检查',
+        dependencies: [],
+        permissions: [],
+        validation: [],
+        revision: 1,
+      },
+      reviewChecks: [{ id: 'check-1', label: '内容与文件' }],
+    }
+    const fetcher = vi.fn<typeof fetch>(async input =>
+      String(input).includes('team-skill-reviews') ? response([review]) : response([skill]),
+    )
     configure(fetcher)
     render(React.createElement(AdminDashboard))
     fireEvent.click(await screen.findByRole('button', { name: /审核队列/ }))
     fireEvent.click(await screen.findByRole('button', { name: '驳回版本' }))
     fireEvent.change(screen.getByLabelText('驳回原因'), { target: { value: '权限声明需要收敛' } })
     fireEvent.click(screen.getByRole('button', { name: '确认驳回' }))
-    await waitFor(() =>{  expect(fetcher.mock.calls.some(([, init]) => String(init?.body).includes('权限声明需要收敛'))).toBe(true); })
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([, init]) => String(init?.body).includes('权限声明需要收敛'))).toBe(true)
+    })
   })
 
   it('lets an author edit a draft, upload its ZIP, and submit it for review', async () => {
@@ -201,13 +558,20 @@ describe('AdminDashboard', () => {
     let currentVersion = version
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input)
-      if (url.includes('/directory/users')) return response({ items: [{ user_id: 'manager-1', display_name: '组织经理', email: 'manager@example.com', groups: ['platform'] }] })
+      if (url.includes('/directory/users'))
+        return response({ items: [{ user_id: 'manager-1', display_name: '组织经理', email: 'manager@example.com', groups: ['platform'] }] })
       if (url.endsWith('/team-skills')) return response([draft])
       if (url.includes('/artifact') && init?.method === 'PUT') {
-        currentVersion = { ...currentVersion, artifactSizeBytes: 100, validation: [{ name: 'DSH 单层目录', status: 'passed' as const }], revision: currentVersion.revision + 1 }
+        currentVersion = {
+          ...currentVersion,
+          artifactSizeBytes: 100,
+          validation: [{ name: 'DSH 单层目录', status: 'passed' as const }],
+          revision: currentVersion.revision + 1,
+        }
         return response({ skill: draft, version: currentVersion })
       }
-      if (url.includes('/team-skills/skill-1') && (init?.method === undefined || init.method === 'GET')) return response({ skill: draft, versions: [currentVersion] })
+      if (url.includes('/team-skills/skill-1') && (init?.method === undefined || init.method === 'GET'))
+        return response({ skill: draft, versions: [currentVersion] })
       return response({ skill: draft, version: currentVersion })
     })
     configure(fetcher)
@@ -218,21 +582,41 @@ describe('AdminDashboard', () => {
     fireEvent.change(screen.getAllByLabelText('分类')[1], { target: { value: '工程效率' } })
     fireEvent.change(screen.getAllByLabelText('标签')[1], { target: { value: '发布,审核' } })
     fireEvent.click(screen.getByRole('button', { name: '保存 Skill 信息' }))
-    await waitFor(() =>{  expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PATCH' && String(init.body).includes('工程效率'))).toBe(true); })
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PATCH' && String(init.body).includes('工程效率'))).toBe(true)
+    })
     fireEvent.change(screen.getByLabelText('版本说明'), { target: { value: '补充发布检查' } })
     fireEvent.change(screen.getByLabelText('依赖'), { target: { value: 'DSH >= 0.1.1\nnode >= 22' } })
     fireEvent.change(screen.getByLabelText('权限'), { target: { value: 'read_file\nwrite_file' } })
     fireEvent.click(screen.getByRole('button', { name: '保存版本信息' }))
-    await waitFor(() =>{  expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PATCH' && String(init.body).includes('补充发布检查'))).toBe(true); })
-    fireEvent.change(screen.getByLabelText('Skill ZIP'), { target: { files: [new File(['zip'], 'skill.zip', { type: 'application/zip' })] } })
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PATCH' && String(init.body).includes('补充发布检查'))).toBe(true)
+    })
+    fireEvent.change(screen.getByLabelText('Skill ZIP'), {
+      target: { files: [new File(['zip'], 'skill.zip', { type: 'application/zip' })] },
+    })
     fireEvent.click(screen.getByRole('button', { name: '上传 ZIP' }))
-    await waitFor(() =>{  expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PUT' && new Headers(init.headers).get('Content-Type') === 'application/zip')).toBe(true); })
+    await waitFor(() => {
+      expect(
+        fetcher.mock.calls.some(
+          ([, init]) => init?.method === 'PUT' && new Headers(init.headers).get('Content-Type') === 'application/zip',
+        ),
+      ).toBe(true)
+    })
     fireEvent.click(screen.getByRole('button', { name: '提交审核' }))
-    await waitFor(() =>{  expect(fetcher.mock.calls.some(([input, init]) => String(input).includes('submit-review') && init?.method === 'POST')).toBe(true); })
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input, init]) => String(input).includes('submit-review') && init?.method === 'POST')).toBe(true)
+    })
   })
 
   it('sends the selected historical release and current Skill revision for rollback', async () => {
-    const rollbackSkill = { ...skill, publishedVersions: ['1.0.0', '0.9.0'], currentVersion: '1.0.0', status: 'published' as const, revision: 8 }
+    const rollbackSkill = {
+      ...skill,
+      publishedVersions: ['1.0.0', '0.9.0'],
+      currentVersion: '1.0.0',
+      status: 'published' as const,
+      revision: 8,
+    }
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       if (init?.method === 'POST') return response({ skill: rollbackSkill })
       return response([rollbackSkill])
@@ -244,13 +628,27 @@ describe('AdminDashboard', () => {
     expect(screen.getByRole('dialog', { name: '回滚版本' })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: '回滚目标版本' })).toHaveProperty('value', '0.9.0')
     fireEvent.click(screen.getByRole('button', { name: '确认回滚' }))
-    await waitFor(() =>{  expect(fetcher.mock.calls.some(([input, init]) => String(input).includes('/rollback') && init?.method === 'POST' && String(init.body).includes('0.9.0') && new Headers(init.headers).get('If-Match') === '8')).toBe(true); })
+    await waitFor(() => {
+      expect(
+        fetcher.mock.calls.some(
+          ([input, init]) =>
+            String(input).includes('/rollback') &&
+            init?.method === 'POST' &&
+            String(init.body).includes('0.9.0') &&
+            new Headers(init.headers).get('If-Match') === '8',
+        ),
+      ).toBe(true)
+    })
   })
 
   it('hides permission management for a member session and never sends a browser access token', async () => {
     const fetcher = vi.fn<typeof fetch>(async (_input, _init) => response({ code: 'FORBIDDEN', message: '需要管理员权限' }, 403))
     vi.stubGlobal('fetch', fetcher)
-    render(React.createElement(AdminDashboard, { session: { user: { id: 'member-1', name: '演示成员', email: 'member@example.com' }, role: 'member', mustChangePassword: false }, }))
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'member-1', name: '演示成员', email: 'member@example.com' }, role: 'member', mustChangePassword: false },
+      }),
+    )
     expect(screen.queryByText('权限管理', { exact: true })).toBeNull()
     await screen.findByRole('heading', { name: '服务请求失败' })
     expect(fetcher).toHaveBeenCalled()
@@ -261,24 +659,43 @@ describe('AdminDashboard', () => {
   it('clears the Auth.js session when the service rejects the current token', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => response({ code: 'AUTH_REQUIRED', message: '需要有效的后台 Session' }, 401))
     vi.stubGlobal('fetch', fetcher)
-    render(React.createElement(AdminDashboard, { session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false } }))
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
     await waitFor(() => {
-      expect(signOut).toHaveBeenCalledWith({ redirect: true, callbackUrl: '/' })
+      expect(signOut).toHaveBeenCalledWith({ redirect: true, redirectTo: '/' })
     })
   })
 
   it('opens the account permission pages for an admin session and shows a one-time password', async () => {
-    const user = { user_id: 'member-1', username: 'member@example.com', email: 'member@example.com', display_name: '演示成员', status: 'active' as const, global_role: 'member' as const, must_change_password: false, revision: 1, memberships: [{ organization_id: 'org-alpha', organization_name: '星河 AI 平台', status: 'active' as const, revision: 1 }] }
+    const user = {
+      user_id: 'member-1',
+      username: 'member@example.com',
+      email: 'member@example.com',
+      display_name: '演示成员',
+      status: 'active' as const,
+      global_role: 'member' as const,
+      must_change_password: false,
+      revision: 1,
+      memberships: [{ organization_id: 'org-alpha', organization_name: '星河 AI 平台', status: 'active' as const, revision: 1 }],
+    }
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input)
       if (url.includes('/admin/users') && init?.method === 'POST') return response({ user, initial_password: 'one-time-password' }, 201)
       if (url.includes('/admin/users')) return response({ items: [user] })
-      if (url.includes('/admin/organizations')) return response({ items: [{ organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 }] })
+      if (url.includes('/admin/organizations'))
+        return response({ items: [{ organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 }] })
       if (url.includes('/admin/team-skills')) return response([])
       return response({ items: [] })
     })
     vi.stubGlobal('fetch', fetcher)
-    render(React.createElement(AdminDashboard, { session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false }, }))
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
     fireEvent.click(screen.getByRole('button', { name: /权限管理/ }))
     fireEvent.click(await screen.findByRole('button', { name: /用户与成员/ }))
     expect(await screen.findByRole('heading', { name: '用户与成员' })).toBeTruthy()
@@ -296,9 +713,32 @@ describe('AdminDashboard', () => {
   })
 
   it('sends the removed project-member revision when restoring authorization', async () => {
-    const project = { project_id: 'project-alpha', organization_id: 'org-alpha', name: '协作台前端', status: 'active' as const, revision: 5 }
-    const removedMember = { project_id: 'project-alpha', organization_id: 'org-alpha', user_id: 'member-1', display_name: '演示成员', status: 'removed' as const, revision: 4 }
-    const user = { user_id: 'member-1', username: 'member@example.com', email: 'member@example.com', display_name: '演示成员', status: 'active' as const, global_role: 'member' as const, must_change_password: false, revision: 1, memberships: [{ organization_id: 'org-alpha', organization_name: '星河 AI 平台', status: 'active' as const, revision: 1 }] }
+    const project = {
+      project_id: 'project-alpha',
+      organization_id: 'org-alpha',
+      name: '协作台前端',
+      status: 'active' as const,
+      revision: 5,
+    }
+    const removedMember = {
+      project_id: 'project-alpha',
+      organization_id: 'org-alpha',
+      user_id: 'member-1',
+      display_name: '演示成员',
+      status: 'removed' as const,
+      revision: 4,
+    }
+    const user = {
+      user_id: 'member-1',
+      username: 'member@example.com',
+      email: 'member@example.com',
+      display_name: '演示成员',
+      status: 'active' as const,
+      global_role: 'member' as const,
+      must_change_password: false,
+      revision: 1,
+      memberships: [{ organization_id: 'org-alpha', organization_name: '星河 AI 平台', status: 'active' as const, revision: 1 }],
+    }
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input)
       if (url.includes('/admin/projects/project-alpha/members/member-1') && init?.method === 'PUT') return response(project)
@@ -308,20 +748,46 @@ describe('AdminDashboard', () => {
       return response([])
     })
     vi.stubGlobal('fetch', fetcher)
-    render(React.createElement(AdminDashboard, { session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false } }))
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
     fireEvent.click(screen.getByRole('button', { name: /权限管理/ }))
     fireEvent.click(await screen.findByRole('button', { name: '项目授权项目成员关系' }))
     const memberSelector = await screen.findByRole('combobox', { name: '选择组织成员' })
-    await waitFor(() => expect([... (memberSelector as HTMLSelectElement).options].some(option => option.value === 'member-1')).toBe(true))
+    await waitFor(() => {
+      expect([...(memberSelector as HTMLSelectElement).options].some(option => option.value === 'member-1')).toBe(true)
+    })
     fireEvent.change(memberSelector, { target: { value: 'member-1' } })
     fireEvent.click(screen.getByRole('button', { name: '授权' }))
     await waitFor(() => {
-      expect(fetcher.mock.calls.some(([input, init]) => String(input).includes('/admin/projects/project-alpha/members/member-1') && init?.method === 'PUT' && new Headers(init.headers).get('If-Match') === '4')).toBe(true)
+      expect(
+        fetcher.mock.calls.some(
+          ([input, init]) =>
+            String(input).includes('/admin/projects/project-alpha/members/member-1') &&
+            init?.method === 'PUT' &&
+            new Headers(init.headers).get('If-Match') === '4',
+        ),
+      ).toBe(true)
     })
   })
 
   it('opens independent project management and renders lifecycle tabs', async () => {
-    const project = { project_id: 'project-alpha', organization_id: 'org-alpha', organization_name: '星河 AI 平台', name: '协作台前端', description: '第一方项目', status: 'draft' as const, created_by: 'admin-1', created_at: '2026-08-30T00:00:00Z', updated_at: '2026-08-30T00:00:00Z', member_count: 0, asset_count: 0, revision: 1 }
+    const project = {
+      project_id: 'project-alpha',
+      organization_id: 'org-alpha',
+      organization_name: '星河 AI 平台',
+      name: '协作台前端',
+      description: '第一方项目',
+      status: 'draft' as const,
+      created_by: 'admin-1',
+      created_at: '2026-08-30T00:00:00Z',
+      updated_at: '2026-08-30T00:00:00Z',
+      member_count: 0,
+      asset_count: 0,
+      revision: 1,
+    }
     const fetcher = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input)
       if (url.endsWith('/admin/projects') && init?.method === 'POST') return response(project, 201)
@@ -330,18 +796,25 @@ describe('AdminDashboard', () => {
       if (url.includes('/members')) return response({ items: [] })
       if (url.includes('/assets')) return response({ items: [] })
       if (url.includes('/authorization-audits')) return response({ items: [] })
-      if (url.includes('/admin/organizations')) return response({ items: [{ organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 }] })
+      if (url.includes('/admin/organizations'))
+        return response({ items: [{ organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 }] })
       if (url.includes('/admin/team-skills')) return response([])
       return response({ items: [] })
     })
     vi.stubGlobal('fetch', fetcher)
-    render(React.createElement(AdminDashboard, { session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false } }))
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
     fireEvent.click(await screen.findByRole('button', { name: /项目管理/ }))
     fireEvent.click(await screen.findByRole('button', { name: '项目列表项目资源与生命周期' }))
     expect(await screen.findByRole('heading', { name: '项目列表' })).toBeTruthy()
     fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '新项目' } })
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
-    await waitFor(() => expect(fetcher.mock.calls.some(([input, init]) => String(input).endsWith('/admin/projects') && init?.method === 'POST')).toBe(true))
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([input, init]) => String(input).endsWith('/admin/projects') && init?.method === 'POST')).toBe(true)
+    })
     fireEvent.click(screen.getByRole('button', { name: /协作台前端/ }))
     expect(await screen.findByRole('heading', { name: '协作台前端' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: '概览' })).toBeTruthy()
@@ -352,7 +825,20 @@ describe('AdminDashboard', () => {
 
   it('keeps project management and detail tab state in stable URLs', async () => {
     window.history.replaceState({}, '', '/')
-    const project = { project_id: 'project-alpha', organization_id: 'org-alpha', organization_name: '星河 AI 平台', name: '协作台前端', description: '第一方项目', status: 'active' as const, created_by: 'admin-1', created_at: '2026-08-30T00:00:00Z', updated_at: '2026-08-30T00:00:00Z', member_count: 0, asset_count: 0, revision: 1 }
+    const project = {
+      project_id: 'project-alpha',
+      organization_id: 'org-alpha',
+      organization_name: '星河 AI 平台',
+      name: '协作台前端',
+      description: '第一方项目',
+      status: 'active' as const,
+      created_by: 'admin-1',
+      created_at: '2026-08-30T00:00:00Z',
+      updated_at: '2026-08-30T00:00:00Z',
+      member_count: 0,
+      asset_count: 0,
+      revision: 1,
+    }
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.endsWith('/admin/projects')) return response({ items: [project] })
@@ -360,12 +846,17 @@ describe('AdminDashboard', () => {
       if (url.includes('/members')) return response({ items: [] })
       if (url.includes('/assets')) return response({ items: [] })
       if (url.includes('/authorization-audits')) return response({ items: [] })
-      if (url.includes('/admin/organizations')) return response({ items: [{ organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 }] })
+      if (url.includes('/admin/organizations'))
+        return response({ items: [{ organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 }] })
       if (url.includes('/admin/team-skills')) return response([])
       return response({ items: [] })
     })
     vi.stubGlobal('fetch', fetcher)
-    render(React.createElement(AdminDashboard, { session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false } }))
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
     fireEvent.click(await screen.findByRole('button', { name: /项目管理/ }))
     fireEvent.click(await screen.findByRole('button', { name: '项目列表项目资源与生命周期' }))
     fireEvent.click(await screen.findByRole('button', { name: /协作台前端/ }))
