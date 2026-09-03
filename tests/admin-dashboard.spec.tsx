@@ -52,6 +52,16 @@ describe('AdminDashboard', () => {
     expect(await screen.findByText('当前没有可见的 Skill 资产')).toBeTruthy()
   })
 
+  it('shows the knowledge-base management page for an authenticated administrator', async () => {
+    const fetcher = vi.fn<typeof fetch>(async input => String(input).includes('knowledge-bases') ? response({ items: [{ knowledge_base_id: 'k-1', organization_id: 'org-alpha', name: '发布流程', description: '发布规范', type: 'document', state: 'active', searchable: true, updated_at: '2026-09-02T00:00:00Z', revision: 1 }] }) : response([]))
+    configure(fetcher)
+    render(React.createElement(AdminDashboard, { session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false } }))
+    fireEvent.click(screen.getByRole('button', { name: /知识库管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /知识库文档、FAQ 与 Wiki/ }))
+    expect(await screen.findByRole('heading', { name: '知识库' })).toBeTruthy()
+    expect(screen.getByText('发布流程')).toBeTruthy()
+  })
+
   it('expands only the selected primary navigation menu', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => response([]))
     configure(fetcher)

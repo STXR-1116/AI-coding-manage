@@ -66,6 +66,15 @@ describe('TeamSkillApi', () => {
     expect(new Headers(init?.headers).get('Authorization')).toBeNull()
   })
 
+  it('uses the platform knowledge-base list for an unfiltered management view', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }))
+    const api = new TeamSkillApi({ baseUrl: 'https://skills.example/v1', accessToken: 'token-1', fetcher })
+    await expect(api.listKnowledgeBases()).resolves.toEqual({ ok: true, value: [] })
+    expect(fetcher.mock.calls[0]?.[0]).toBe('https://skills.example/v1/admin/knowledge-bases')
+    await api.listKnowledgeBases('org-alpha')
+    expect(fetcher.mock.calls[1]?.[0]).toBe('https://skills.example/v1/admin/organizations/org-alpha/knowledge-bases')
+  })
+
   it('sends account mutations with idempotency and revision headers', async () => {
     const fetcher = vi.fn<typeof fetch>(async (_input, _init) => new Response(JSON.stringify({ user_id: 'member-1', username: 'member@example.com', email: 'member@example.com', display_name: '成员', status: 'suspended', must_change_password: false, revision: 2 }), { status: 200 }))
     const api = new TeamSkillApi({ baseUrl: 'https://skills.example/v1', accessToken: 'token-1', fetcher })

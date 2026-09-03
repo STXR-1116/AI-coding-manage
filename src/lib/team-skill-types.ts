@@ -153,3 +153,46 @@ export interface AuthorizationAudit {
   readonly error_code?: string
   readonly request_id: string
 }
+
+export type AdminKnowledgeBaseType = 'document' | 'faq' | 'wiki'
+export type AdminKnowledgeBaseState = 'active' | 'unavailable' | 'deleting'
+
+export interface AdminKnowledgeBase {
+  readonly knowledge_base_id: string
+  readonly organization_id: string
+  readonly name: string
+  readonly description: string
+  readonly type: AdminKnowledgeBaseType
+  readonly state: AdminKnowledgeBaseState
+  readonly searchable: boolean
+  readonly updated_at: string
+  readonly revision: number
+  readonly document_count?: number
+}
+
+export interface AdminKnowledgeDocument {
+  readonly document_id: string
+  readonly title: string
+  readonly source: string
+  readonly status: 'pending' | 'processing' | 'completed' | 'failed'
+  readonly snippet?: string
+}
+
+export interface AdminKnowledgeOperation {
+  readonly operation_id: string
+  readonly operation_type?: string
+  readonly status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  readonly document_id?: string
+  readonly knowledge_base?: AdminKnowledgeBase
+}
+
+export interface AdminKnowledgeDeleteImpact {
+  readonly knowledge_base_id: string
+  readonly revision: number
+  readonly affected_projects: readonly { readonly project_id: string; readonly name: string; readonly status: 'draft' | 'active' | 'archived' }[]
+}
+
+export interface AdminKnowledgeGraph {
+  readonly nodes: readonly Record<string, unknown>[]
+  readonly relations: readonly Record<string, unknown>[]
+}

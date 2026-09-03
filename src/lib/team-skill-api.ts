@@ -1,4 +1,4 @@
-import type { AccountRole, AdminOrganization, AdminProject, AdminProjectAsset, AdminProjectMember, AdminUser, AuthorizationAudit, AuditLogEntry, DirectoryUser, PermissionDefinition, ReviewItem, RoleDefinition, SkillVersion, TeamSkill } from './team-skill-types.ts'
+import type { AccountRole, AdminKnowledgeBase, AdminKnowledgeDeleteImpact, AdminKnowledgeDocument, AdminKnowledgeGraph, AdminKnowledgeOperation, AdminOrganization, AdminProject, AdminProjectAsset, AdminProjectMember, AdminUser, AuthorizationAudit, AuditLogEntry, DirectoryUser, PermissionDefinition, ReviewItem, RoleDefinition, SkillVersion, TeamSkill } from './team-skill-types.ts'
 
 export type ApiError =
   | { readonly kind: 'not-ready'; readonly missing: readonly string[] }
@@ -175,6 +175,55 @@ export class TeamSkillApi {
     if (projectId !== undefined && projectId.length > 0) search.set('project_id', projectId)
     return this.listEnvelope(`/admin/authorization-audits${search.size === 0 ? '' : `?${search.toString()}`}`)
   }
+  /** List organization knowledge bases in the current management scope. */
+  listKnowledgeBases(organizationId?: string): Promise<ApiResult<readonly AdminKnowledgeBase[]>> {
+    if (organizationId === undefined) return this.listEnvelope('/admin/knowledge-bases')
+    return this.listEnvelope(`/admin/organizations/${encodeURIComponent(organizationId)}/knowledge-bases`)
+  }
+  /** Create a knowledge base and return its external-operation state. */
+  createKnowledgeBase(organizationId: string, input: { readonly name: string; readonly description: string; readonly type: AdminKnowledgeBase['type'] }, idempotencyKey: string): Promise<ApiResult<AdminKnowledgeOperation>> {
+    return this.request(`/admin/organizations/${encodeURIComponent(organizationId)}/knowledge-bases`, { method: 'POST', body: JSON.stringify(input), headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': '1' } }) as Promise<ApiResult<AdminKnowledgeOperation>>
+  }
+  /** Read one knowledge base. */
+  getKnowledgeBase(knowledgeBaseId: string): Promise<ApiResult<AdminKnowledgeBase>> { return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`) }
+  /** Read projects affected by external knowledge-base deletion. */
+  getKnowledgeDeleteImpact(knowledgeBaseId: string): Promise<ApiResult<AdminKnowledgeDeleteImpact>> { return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/delete-impact`) }
+  /** Start an external knowledge-base deletion after an impact confirmation. */
+  deleteKnowledgeBase(knowledgeBaseId: string, revision: number, affectedProjectCount: number, idempotencyKey: string): Promise<ApiResult<AdminKnowledgeOperation>> {
+    return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`, { method: 'DELETE', body: JSON.stringify({ expected_revision: revision, confirm_affected_project_count: affectedProjectCount }), headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) } }) as Promise<ApiResult<AdminKnowledgeOperation>>
+  }
+  /** Update basic knowledge-base configuration with optimistic concurrency. */
+  updateKnowledgeBase(knowledgeBaseId: string, input: { readonly name?: string; readonly description?: string }, revision: number, idempotencyKey: string): Promise<ApiResult<AdminKnowledgeBase>> {
+    return this.mutate(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`, revision, undefined, idempotencyKey, input, 'PATCH') as Promise<ApiResult<AdminKnowledgeBase>>
+  }
+  /** List documents and their authoritative processing states. */
+  listKnowledgeDocuments(knowledgeBaseId: string): Promise<ApiResult<readonly AdminKnowledgeDocument[]>> { return this.listEnvelope(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents`) }
+  /** Read one document. */
+  getKnowledgeDocument(knowledgeBaseId: string, documentId: string): Promise<ApiResult<AdminKnowledgeDocument>> { return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/${encodeURIComponent(documentId)}`) }
+  /** Start document reprocessing. */
+  reparseKnowledgeDocument(knowledgeBaseId: string, documentId: string, revision: number, idempotencyKey: string): Promise<ApiResult<AdminKnowledgeOperation>> {
+    return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/${encodeURIComponent(documentId)}/reparse`, { method: 'POST', body: JSON.stringify({ expected_revision: revision }), headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) } }) as Promise<ApiResult<AdminKnowledgeOperation>>
+  }
+  /** Start document deletion. */
+  deleteKnowledgeDocument(knowledgeBaseId: string, documentId: string, revision: number, idempotencyKey: string): Promise<ApiResult<AdminKnowledgeOperation>> {
+    return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE', body: JSON.stringify({ expected_revision: revision }), headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) } }) as Promise<ApiResult<AdminKnowledgeOperation>>
+  }
+  /** Read wiki graph data. */
+  getKnowledgeGraph(knowledgeBaseId: string): Promise<ApiResult<AdminKnowledgeGraph>> { return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/graph`) }
+  /** Import hand-authored Markdown through an asynchronous service operation. */
+  importKnowledgeMarkdown(knowledgeBaseId: string, input: { readonly title: string; readonly markdown: string }, revision: number, idempotencyKey: string): Promise<ApiResult<AdminKnowledgeOperation>> {
+    return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/markdown`, { method: 'POST', body: JSON.stringify(input), headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) } }) as Promise<ApiResult<AdminKnowledgeOperation>>
+  }
+  /** Import a URL as an asynchronous document operation. */
+  importKnowledgeUrl(knowledgeBaseId: string, input: { readonly title?: string; readonly url: string }, revision: number, idempotencyKey: string): Promise<ApiResult<AdminKnowledgeOperation>> {
+    return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/urls`, { method: 'POST', body: JSON.stringify(input), headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) } }) as Promise<ApiResult<AdminKnowledgeOperation>>
+  }
+  /** Import one uploaded file descriptor as an asynchronous document operation. */
+  importKnowledgeFile(knowledgeBaseId: string, input: { readonly title: string; readonly file_name: string }, revision: number, idempotencyKey: string): Promise<ApiResult<AdminKnowledgeOperation>> {
+    return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/files`, { method: 'POST', body: JSON.stringify(input), headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) } }) as Promise<ApiResult<AdminKnowledgeOperation>>
+  }
+  /** Read one operation status. */
+  getKnowledgeOperation(operationId: string): Promise<ApiResult<AdminKnowledgeOperation>> { return this.request(`/admin/operations/${encodeURIComponent(operationId)}`) as Promise<ApiResult<AdminKnowledgeOperation>> }
   /** Read a Skill with its version timeline. */
   getSkill(skillId: string): Promise<ApiResult<{ readonly skill: TeamSkill; readonly versions: readonly SkillVersion[] }>> { return this.request(`/admin/team-skills/${encodeURIComponent(skillId)}`) }
   /** Create the first author-owned draft. */

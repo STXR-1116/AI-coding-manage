@@ -2,7 +2,7 @@
 
 本目录是 Web 管理后台源码交付，供后端同事实现项目管理服务 API 并进行真实 HTTP 联调。应用使用 Next.js 15、React 18、NextAuth Credentials 和 TypeScript；源码只包含后台页面、同源 API 代理、认证会话和测试，不包含生产数据库或服务实现。
 
-接口和页面决策文档随交付物保存在 `docs/服务API-项目管理需求文档.md` 与 `docs/后台管理-项目管理设计文档.md`，实现以这两份文档和源码共同约束。
+接口和页面决策文档随交付物保存在 `docs/`，包括项目管理和知识库设计/API 文档；实现以这些文档和源码共同约束。
 
 ## 功能范围
 
@@ -17,6 +17,8 @@
 
 项目生命周期固定为 `draft -> active -> archived`，归档后只读且不可恢复。后台不提供代码源、上传、任务、Run、Git、Workspace、本地路径或批量写入口；资产关联页当前手工输入不透明 `asset_id`，没有候选资产查询。
 
+知识库管理页支持组织范围列表、`document`/`faq`/`wiki` 三种类型创建、基础配置、Markdown/URL/文件描述导入、异步操作状态轮询、文档重解析/删除和删除影响确认。FAQ、Wiki、图谱、项目和审计页签目前只呈现服务端能力说明；文件夹/标签 CRUD、FAQ/Wiki 条目编辑、真实图谱数据、项目关联操作和知识库审计查询尚未接入页面。
+
 ## 目录结构
 
 ```text
@@ -27,7 +29,7 @@ src/app/api/session/route.ts              # 会话读取
 src/app/api/team-skill/[...path]/route.ts # 同源服务 API 代理
 src/auth.ts                               # Credentials 登录与令牌刷新
 src/auth-session.ts                       # Refresh Token 轮换解析
-src/components/admin-dashboard.tsx       # 菜单、项目列表、四页签及其他 Skill 管理页面
+src/components/admin-dashboard.tsx       # 菜单、项目/知识库页面、项目页签及其他 Skill 管理页面
 src/lib/team-skill-api.ts                 # 类型化 REST 客户端
 src/lib/team-skill-types.ts               # 服务响应和项目模型
 tests/                                    # API、路由和组件测试
@@ -54,7 +56,7 @@ $env:AUTH_SECRET='local-only-change-me'
 pnpm --filter @deepseek-ai/team-skill-admin dev
 ```
 
-默认 Next.js 地址为 `http://localhost:3000`。生产部署应使用固定 `AUTH_SECRET`、HTTPS、受保护的服务 URL，并由服务端实现企业认证、持久化和审计留存。
+默认 Next.js 地址为 `http://localhost:3000`。生产部署应使用固定 `AUTH_SECRET`、HTTPS、受保护的服务 URL，并由服务端实现企业认证、真实 WeKnora 适配、持久化和审计留存。
 
 ## 路由和页面行为
 
