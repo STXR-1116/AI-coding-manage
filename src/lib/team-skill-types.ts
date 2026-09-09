@@ -1,7 +1,9 @@
-export type SkillStatus = 'draft' | 'pending_review' | 'approved' | 'published' | 'withdrawn'
+type SkillStatus = 'draft' | 'pending_review' | 'approved' | 'published' | 'withdrawn'
 
 export interface TeamSkill {
   readonly skillId: string
+  /** Owning organization the Skill was authored under. */
+  readonly organizationId?: string
   readonly displayName: string
   readonly summary: string
   readonly runtimeName: string
@@ -18,6 +20,8 @@ export interface TeamSkill {
   readonly visibility: 'organization' | 'group' | 'people'
   readonly groupId?: string
   readonly peopleIds?: readonly string[]
+  /** Server-authoritative project asset bindings; a published Skill without bindings is not discoverable in any project. */
+  readonly projectIds?: readonly string[]
   readonly revision: number
   readonly authorName?: string
   readonly publishedAt?: string
@@ -48,7 +52,7 @@ export interface SkillVersion {
 export interface AuditLogEntry {
   readonly id: string
   readonly occurredAt: string
-  readonly actorName: string
+  readonly actor_name: string
   readonly action: string
   readonly skillName: string
   readonly version: string
@@ -64,7 +68,7 @@ export interface ReviewItem {
 }
 
 export type AccountRole = 'admin' | 'manager' | 'member'
-export type AccountStatus = 'active' | 'suspended'
+type AccountStatus = 'active' | 'suspended'
 
 export interface AdminOrganization {
   readonly organization_id: string
@@ -154,8 +158,8 @@ export interface AuthorizationAudit {
   readonly request_id: string
 }
 
-export type AdminKnowledgeBaseType = 'document' | 'faq' | 'wiki'
-export type AdminKnowledgeBaseState = 'active' | 'unavailable' | 'deleting'
+type AdminKnowledgeBaseType = 'document' | 'faq' | 'wiki'
+type AdminKnowledgeBaseState = 'active' | 'unavailable' | 'deleting'
 
 export interface AdminKnowledgeBase {
   readonly knowledge_base_id: string
@@ -221,7 +225,26 @@ export interface AdminMemoryRecord {
 export interface AdminMemoryList {
   readonly items: readonly AdminMemoryRecord[]
   readonly next_cursor: string | null
-  readonly total_estimate?: number
+  readonly total_estimate: number
+}
+
+export interface AdminMemoryMutation {
+  readonly memory?: AdminMemoryRecord
+  readonly event_id: string
+  readonly job_id: string
+  readonly status: 'PENDING' | 'INDEX_PENDING'
+  readonly accepted_count?: number
+  readonly cleanup_status?: 'PENDING' | 'FAILED'
+}
+
+export interface AdminMemoryJobList {
+  readonly items: readonly AdminMemoryJob[]
+  readonly next_cursor: string | null
+}
+
+export interface AdminMemoryAuditList {
+  readonly items: readonly AdminMemoryAudit[]
+  readonly next_cursor: string | null
 }
 
 export interface AdminMemoryPolicy {
@@ -235,7 +258,7 @@ export interface AdminMemoryPolicy {
 export interface AdminMemoryJob {
   readonly job_id: string
   readonly event_id: string
-  readonly kind: 'CAPTURE' | 'INDEX_REFRESH' | 'DELETE_CLEANUP' | 'SCOPE_MOVED'
+  readonly kind: 'CAPTURE' | 'INDEX_REFRESH' | 'DELETE_CLEANUP' | 'PROJECT_PROVISION' | 'POLICY_UPDATE' | 'PROJECT_PURGE'
   readonly team_id: string
   readonly project_id: string
   readonly requested_by_user_id: string
@@ -257,4 +280,183 @@ export interface AdminMemoryAudit {
   readonly project_id: string
   readonly result: string
   readonly event_id: string
+}
+
+export interface TelemetryTokenUsage {
+  readonly input_tokens: number | null
+  readonly output_tokens: number | null
+  readonly total_tokens: number | null
+}
+
+export interface TelemetryErrorDetail {
+  readonly name: string
+  readonly code: string | null
+  readonly summary: string | null
+}
+
+export interface TelemetryApprovalDetail {
+  readonly decision: 'allowed_once' | 'rejected' | 'cancelled' | 'unavailable' | null
+}
+
+export interface TelemetryCompactionDetail {
+  readonly kind: string | null
+}
+
+export interface TelemetryGapDetail {
+  readonly reason: 'overflow' | 'expired' | 'rejected' | 'manual_clear' | 'authorization_revoked'
+  readonly count: number
+  readonly first_event_id: string | null
+  readonly last_event_id: string | null
+}
+
+export interface TelemetryEventItem {
+  readonly event_id: string
+  readonly installation_id: string
+  readonly project_id: string
+  readonly session_id: string | null
+  readonly kind: string
+  readonly occurred_at: string
+  readonly received_at: string
+  readonly source_type: string
+  readonly source_seq: number | null
+  readonly turn: number | null
+  readonly step: number | null
+  readonly duration_ms: number | null
+  readonly outcome: string | null
+  readonly provider: string | null
+  readonly model: string | null
+  readonly tool_name: string | null
+  readonly tool_category: string | null
+  readonly call_id: string | null
+  readonly approval_id: string | null
+  readonly compaction_id: string | null
+  readonly retryable: boolean | null
+  readonly retry_count: number | null
+  readonly token_usage: TelemetryTokenUsage | null
+  readonly error: TelemetryErrorDetail | null
+  readonly approval: TelemetryApprovalDetail | null
+  readonly compaction: TelemetryCompactionDetail | null
+  readonly gap: TelemetryGapDetail | null
+}
+
+export interface TelemetryEventPage {
+  readonly project_id: string
+  readonly items: readonly TelemetryEventItem[]
+  readonly next_cursor: string | null
+  readonly has_more: boolean
+  readonly retention_days: number
+}
+
+export interface TelemetryWindowCounts {
+  readonly total: number
+  readonly completed: number
+  readonly errors: number
+  readonly interrupted: number
+  readonly cancelled: number
+}
+
+/** 汇总口径（overview 顶层、时间桶、项目摘要共用）；delivery 与各响应的
+ * 顶层 delivery 同源同参折叠 ACK 台账，逐字段一致。 */
+export interface TelemetrySummary {
+  readonly sessions: TelemetryWindowCounts
+  readonly turns: {
+    readonly total: number
+    readonly completed: number
+    readonly errors: number
+    readonly blocked: number
+    readonly max_tokens: number
+    readonly interrupted: number
+    readonly cancelled: number
+    readonly p50_duration_ms: number | null
+    readonly p95_duration_ms: number | null
+  }
+  readonly steps: {
+    readonly started: number
+    readonly finished: number
+    readonly p50_duration_ms: number | null
+    readonly p95_duration_ms: number | null
+  }
+  readonly llm: {
+    readonly requests: number
+    readonly retries: number
+    readonly input_tokens: number
+    readonly output_tokens: number
+    readonly total_tokens: number | null
+    readonly token_sample_size: number
+    readonly input_token_samples: number
+    readonly output_token_samples: number
+    readonly total_token_samples: number
+  }
+  readonly tools: {
+    readonly calls: number
+    readonly errors: number
+    readonly p50_duration_ms: number | null
+    readonly p95_duration_ms: number | null
+  }
+  readonly approvals: {
+    readonly requested: number
+    readonly allowed_once: number
+    readonly rejected: number
+    readonly cancelled: number
+    readonly unavailable: number
+  }
+  readonly compactions: number
+  readonly delivery: TelemetryDelivery
+}
+
+export interface TelemetryOverview {
+  readonly from: string
+  readonly to: string
+  readonly has_data: boolean
+  readonly summary: TelemetrySummary
+  readonly buckets: readonly TelemetryBucket[]
+  readonly retention_days: number
+}
+
+export interface TelemetryBucket extends TelemetrySummary {
+  readonly bucket_start: string
+}
+
+export interface TelemetryProjectSummary {
+  readonly project_id: string
+  readonly from: string
+  readonly to: string
+  readonly has_data: boolean
+  readonly summary: TelemetrySummary
+  readonly models: readonly TelemetryModelUsage[]
+  readonly tools: readonly TelemetryToolUsage[]
+  readonly delivery: TelemetryDelivery
+  readonly retention_days: number
+}
+
+export interface TelemetryModelUsage {
+  readonly provider: string
+  readonly model: string
+  readonly requests: number
+  readonly input_tokens: number
+  readonly output_tokens: number
+  readonly total_tokens: number | null
+  readonly input_token_samples: number
+  readonly output_token_samples: number
+  readonly total_token_samples: number
+}
+
+export interface TelemetryToolUsage {
+  readonly tool_name: string
+  readonly calls: number
+  readonly errors: number
+  readonly p50_duration_ms: number | null
+  readonly p95_duration_ms: number | null
+}
+
+/** 服务端交付分类快照：accepted/duplicate/retryable/rejected 为累计逐事件
+ * ACK 结果，queued 为服务端当前积压快照（fixture 同步聚合恒为 0，仅
+ * fixture-only 口径），gaps 为已见缺口事件数。 */
+export interface TelemetryDelivery {
+  readonly accepted: number
+  readonly duplicate: number
+  readonly retryable: number
+  readonly rejected: number
+  readonly queued: number
+  readonly gaps: number
 }

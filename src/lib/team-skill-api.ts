@@ -6,8 +6,11 @@ import type {
   AdminKnowledgeGraph,
   AdminKnowledgeOperation,
   AdminMemoryAudit,
+  AdminMemoryAuditList,
   AdminMemoryJob,
+  AdminMemoryJobList,
   AdminMemoryList,
+  AdminMemoryMutation,
   AdminMemoryPolicy,
   AdminMemoryRecord,
   AdminOrganization,
@@ -23,6 +26,15 @@ import type {
   RoleDefinition,
   SkillVersion,
   TeamSkill,
+  TelemetryBucket,
+  TelemetryDelivery,
+  TelemetryEventItem,
+  TelemetryEventPage,
+  TelemetryModelUsage,
+  TelemetryOverview,
+  TelemetryProjectSummary,
+  TelemetrySummary,
+  TelemetryToolUsage,
 } from './team-skill-types.ts'
 
 export type ApiError =
@@ -30,6 +42,7 @@ export type ApiError =
   | { readonly kind: 'unauthorized'; readonly code: string; readonly message: string }
   | { readonly kind: 'forbidden'; readonly code: string; readonly message: string }
   | { readonly kind: 'revision-conflict'; readonly code: 'REVISION_CONFLICT' | 'MEMORY_REVISION_CONFLICT'; readonly message: string }
+  | { readonly kind: 'unavailable'; readonly code: 'NETWORK_ERROR' | 'UPSTREAM_UNAVAILABLE'; readonly message: string }
   | { readonly kind: 'service'; readonly code: string; readonly message: string }
 
 export type ApiResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: ApiError }
@@ -94,14 +107,9 @@ export class TeamSkillApi {
   listSkills(): Promise<ApiResult<readonly TeamSkill[]>> {
     return this.request<unknown>('/admin/team-skills').then(result => {
       if (!result.ok) return result
-      const value = Array.isArray(result.value)
-        ? result.value
-        : isRecord(result.value) && Array.isArray(result.value.items)
-          ? result.value.items
-          : undefined
-      return value === undefined
+      return !Array.isArray(result.value)
         ? { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的 Skill 列表' } }
-        : { ok: true, value: value as readonly TeamSkill[] }
+        : { ok: true, value: result.value as readonly TeamSkill[] }
     })
   }
   /** Search current-organization users for the manual visibility selector. */
@@ -116,6 +124,8 @@ export class TeamSkillApi {
           readonly groups: readonly string[]
         }[]
       }
+      if (!isRecord(result.value) || !Array.isArray(payload.items))
+        return { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的目录用户列表' } }
       return {
         ok: true,
         value: (payload.items ?? []).map(item => ({
@@ -133,7 +143,63 @@ export class TeamSkillApi {
   }
   /** List audit records visible to administrators. */
   listAuditLogs(): Promise<ApiResult<readonly AuditLogEntry[]>> {
-    return this.request('/admin/team-skill-audit-logs')
+    return this.request<unknown>('/admin/team-skill-audit-logs').then(result => {
+      if (!result.ok) return result
+      return Array.isArray(result.value) && result.value.every(isAuditLogEntry)
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回包含操作者姓名的有效 Skill 审计列表' } }
+    })
+  }
+  /** Read role-authorized telemetry aggregation for the requested window. */
+  getTelemetryOverview(
+    query: { readonly from: string; readonly to: string; readonly organizationId?: string; readonly projectId?: string },
+  ): Promise<ApiResult<TelemetryOverview>> {
+    const search = new URLSearchParams({ from: query.from, to: query.to })
+    if (query.organizationId !== undefined) search.set('organization_id', query.organizationId)
+    if (query.projectId !== undefined) search.set('project_id', query.projectId)
+    return this.request(`/admin/telemetry/overview?${search.toString()}`).then(result => {
+      if (!result.ok) return result
+      return isTelemetryOverview(result.value)
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的可观测总览' } }
+    })
+  }
+  /** Read one authorized project's telemetry summary for the requested window. */
+  getProjectTelemetrySummary(
+    projectId: string,
+    query: { readonly from: string; readonly to: string },
+  ): Promise<ApiResult<TelemetryProjectSummary>> {
+    const search = new URLSearchParams({ from: query.from, to: query.to })
+    return this.request(`/admin/projects/${encodeURIComponent(projectId)}/telemetry/summary?${search.toString()}`).then(result => {
+      if (!result.ok) return result
+      return isTelemetryProjectSummary(result.value)
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的项目可观测摘要' } }
+    })
+  }
+  /** Read one page of an authorized project's structured telemetry events. */
+  listProjectTelemetryEvents(
+    projectId: string,
+    query: {
+      readonly from: string
+      readonly to: string
+      readonly kind?: string
+      readonly outcome?: string
+      readonly cursor?: string
+      readonly limit?: number
+    },
+  ): Promise<ApiResult<TelemetryEventPage>> {
+    const search = new URLSearchParams({ from: query.from, to: query.to })
+    if (query.kind !== undefined) search.set('kind', query.kind)
+    if (query.outcome !== undefined) search.set('outcome', query.outcome)
+    if (query.cursor !== undefined) search.set('cursor', query.cursor)
+    if (query.limit !== undefined) search.set('limit', String(query.limit))
+    return this.request(`/admin/projects/${encodeURIComponent(projectId)}/telemetry/events?${search.toString()}`).then(result => {
+      if (!result.ok) return result
+      return isTelemetryEventPage(result.value)
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的事件诊断页' } }
+    })
   }
   /** List organizations visible to the current administrator role. */
   listOrganizations(): Promise<ApiResult<readonly AdminOrganization[]>> {
@@ -395,7 +461,12 @@ export class TeamSkillApi {
     if (organizationId !== undefined) search.set('organization_id', organizationId)
     if (action !== undefined && action.length > 0) search.set('action', action)
     if (projectId !== undefined && projectId.length > 0) search.set('project_id', projectId)
-    return this.listEnvelope(`/admin/authorization-audits${search.size === 0 ? '' : `?${search.toString()}`}`)
+    return this.listEnvelope<unknown>(`/admin/authorization-audits${search.size === 0 ? '' : `?${search.toString()}`}`).then(result => {
+      if (!result.ok) return result
+      return result.value.every(isAuthorizationAudit)
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回包含操作者姓名的有效授权审计列表' } }
+    })
   }
   /** List organization knowledge bases in the current management scope. */
   listKnowledgeBases(organizationId?: string): Promise<ApiResult<readonly AdminKnowledgeBase[]>> {
@@ -414,9 +485,15 @@ export class TeamSkillApi {
       headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': '1' },
     }) as Promise<ApiResult<AdminKnowledgeOperation>>
   }
-  /** Read one knowledge base. */
+  /** Read one knowledge base; the response is validated field-by-field so a
+   * malformed body can never reach the page state as a partial object. */
   getKnowledgeBase(knowledgeBaseId: string): Promise<ApiResult<AdminKnowledgeBase>> {
-    return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`)
+    return this.request(`/admin/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`).then(result => {
+      if (!result.ok) return result
+      return isKnownKnowledgeBase(result.value)
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { kind: 'service' as const, code: 'INVALID_RESPONSE', message: '服务端未返回有效的知识库详情' } }
+    })
   }
   /** Read projects affected by external knowledge-base deletion. */
   getKnowledgeDeleteImpact(knowledgeBaseId: string): Promise<ApiResult<AdminKnowledgeDeleteImpact>> {
@@ -581,41 +658,25 @@ export class TeamSkillApi {
       { 'If-Match': String(revision) },
     ).then(result => {
       if (!result.ok) return result
-      const value = isRecord(result.value) ? result.value.memory : undefined
-      return isMemoryRecord(value)
-        ? { ok: true, value }
-        : { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回更新后的记忆' } }
+      const mutation = parseMemoryMutation(result.value)
+      return mutation === undefined || mutation.memory === undefined
+        ? { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回更新后的记忆' } }
+        : { ok: true, value: mutation.memory }
     })
   }
   /** Delete one memory and return the asynchronous cleanup result. */
-  deleteMemoryRecord(memoryId: string, revision: number, idempotencyKey: string): Promise<ApiResult<unknown>> {
-    return this.memoryRequest(
+  deleteMemoryRecord(memoryId: string, revision: number, idempotencyKey: string): Promise<ApiResult<AdminMemoryMutation>> {
+    return this.memoryRequest<unknown>(
       '/project-memory/delete',
       { memory_id: memoryId, expected_revision: revision },
       { 'If-Match': String(revision), 'Idempotency-Key': idempotencyKey },
-    )
-  }
-  /** Move a memory to another authorized project with optimistic concurrency. */
-  moveMemoryRecord(
-    memoryId: string,
-    targetProjectId: string,
-    revision: number,
-    idempotencyKey: string,
-  ): Promise<ApiResult<AdminMemoryRecord>> {
-    return this.memoryRequest<{ readonly memory?: AdminMemoryRecord }>(
-      '/project-memory/scope/update',
-      { memory_id: memoryId, target_project_id: targetProjectId, expected_revision: revision },
-      { 'If-Match': String(revision), 'Idempotency-Key': idempotencyKey },
-    ).then(result => {
-      if (!result.ok) return result
-      return result.value.memory === undefined
-        ? { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回调整后的记忆' } }
-        : { ok: true, value: result.value.memory }
-    })
+    ).then(result => (result.ok ? parseMemoryMutationResult(result.value) : result))
   }
   /** Read one project's memory policy. */
   getMemoryPolicy(projectId: string): Promise<ApiResult<AdminMemoryPolicy>> {
-    return this.memoryRequest('/project-memory/policy/get', { scope_type: 'project', scope_id: projectId })
+    return this.memoryRequest<unknown>('/project-memory/policy/get', { scope_type: 'project', scope_id: projectId }).then(result =>
+      result.ok ? parseMemoryPolicyResult(result.value) : result,
+    )
   }
   /** Update one project's memory policy. */
   updateMemoryPolicy(
@@ -624,27 +685,37 @@ export class TeamSkillApi {
     revision: number,
     idempotencyKey: string,
   ): Promise<ApiResult<AdminMemoryPolicy>> {
-    return this.memoryRequest(
+    return this.memoryRequest<unknown>(
       '/project-memory/policy/update',
       { scope_type: 'project', scope_id: projectId, patch, expected_revision: revision },
       { 'If-Match': String(revision), 'Idempotency-Key': idempotencyKey },
-    )
+    ).then(result => (result.ok ? parseMemoryPolicyResult(result.value) : result))
   }
   /** Read project-memory jobs. */
-  listMemoryJobs(projectId?: string): Promise<ApiResult<readonly AdminMemoryJob[]>> {
-    return this.memoryList('/project-memory/jobs/list', projectId === undefined ? {} : { project_id: projectId })
+  listMemoryJobs(projectId?: string): Promise<ApiResult<AdminMemoryJobList>> {
+    return this.memoryRequest<unknown>('/project-memory/jobs/list', projectId === undefined ? {} : { project_id: projectId }).then(result => {
+      if (!result.ok) return result
+      return isMemoryJobList(result.value)
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的记忆任务列表' } }
+    })
   }
   /** Read project-memory governance audit records. */
-  listMemoryAudit(projectId?: string): Promise<ApiResult<readonly AdminMemoryAudit[]>> {
-    return this.memoryList('/project-memory/audit/list', projectId === undefined ? {} : { project_id: projectId })
+  listMemoryAudit(projectId?: string): Promise<ApiResult<AdminMemoryAuditList>> {
+    return this.memoryRequest<unknown>('/project-memory/audit/list', projectId === undefined ? {} : { project_id: projectId }).then(result => {
+      if (!result.ok) return result
+      return isMemoryAuditList(result.value)
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的记忆审计列表' } }
+    })
   }
   /** Retry one failed project-memory job. */
   retryMemoryJob(jobId: string, revision: number, idempotencyKey: string): Promise<ApiResult<AdminMemoryJob>> {
-    return this.memoryRequest(
+    return this.memoryRequest<unknown>(
       '/project-memory/jobs/retry',
       { job_id: jobId, expected_revision: revision },
-      { 'Idempotency-Key': idempotencyKey },
-    ).then(result => (result.ok ? { ok: true, value: result.value as AdminMemoryJob } : result))
+      { 'Idempotency-Key': idempotencyKey, 'If-Match': String(revision) },
+    ).then(result => (result.ok ? parseMemoryJobResult(result.value) : result))
   }
   /** Read a Skill with its version timeline. */
   getSkill(skillId: string): Promise<ApiResult<{ readonly skill: TeamSkill; readonly versions: readonly SkillVersion[] }>> {
@@ -838,21 +909,18 @@ export class TeamSkillApi {
   }
 
   private listEnvelope<T>(path: string): Promise<ApiResult<readonly T[]>> {
-    return this.request<{ readonly items?: readonly T[] }>(path).then(result =>
-      result.ok ? { ok: true, value: result.value.items ?? [] } : result,
-    )
+    return this.request<unknown>(path).then(result => {
+      if (!result.ok) return result
+      if (!isRecord(result.value) || !Array.isArray(result.value.items))
+        return { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的列表' } }
+      return { ok: true, value: result.value.items as readonly T[] }
+    })
   }
 
   private memoryRequest<T>(path: string, body: unknown, headers: HeadersInit = {}): Promise<ApiResult<T>> {
     const baseUrl = this.baseUrl?.replace(/\/v1\/?$/u, '/v3')
     const requestPath = baseUrl === this.baseUrl && this.baseUrl?.startsWith('/api/team-skill') === true ? `/v3${path}` : path
-    return this.requestAt<Record<string, unknown>>(baseUrl, requestPath, { method: 'POST', headers, body: JSON.stringify(body) }).then(
-      result => {
-        if (!result.ok) return result
-        const value = result.value.data ?? result.value
-        return { ok: true, value: value as T }
-      },
-    )
+    return this.requestAt<T>(baseUrl, requestPath, { method: 'POST', headers, body: JSON.stringify(body) })
   }
 
   private requestAt<T>(baseUrl: string | undefined, path: string, init: RequestInit = {}): Promise<ApiResult<T>> {
@@ -876,16 +944,35 @@ export class TeamSkillApi {
         },
       })
       const payload = await readJson(response)
-      if (response.ok) return { ok: true, value: payload as T }
-      const code =
-        typeof payload === 'object' && payload !== null && 'code' in payload && typeof payload.code === 'string'
-          ? payload.code
-          : `HTTP_${response.status}`
-      const message =
-        typeof payload === 'object' && payload !== null && 'message' in payload && typeof payload.message === 'string'
-          ? payload.message
-          : '服务端请求失败'
-      if (response.status === 401 || code === 'UNAUTHORIZED' || code === 'AUTH_REQUIRED')
+      if (response.ok) {
+        // 204 无内容：合法的无body成功。
+        if (response.status === 204) return { ok: true, value: undefined as T }
+        const envelope = successEnvelope(payload)
+        if (envelope === undefined)
+          return { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端响应不是有效的统一 envelope' } }
+        // 2xx 只代表传输成功：业务成败由 envelope.code === 0 判定，非零业务码
+        // 进入失败分类并保留 request_id，防止上游业务失败被误判为成功。
+        if (envelope.code !== 0 && envelope.code !== '0') {
+          const code = String(envelope.code)
+          const message = envelope.message
+          if (response.status === 401 || code === 'UNAUTHORIZED' || code === 'AUTH_REQUIRED' || code === 'TOKEN_EXPIRED' || code === 'TOKEN_REVOKED')
+            return { ok: false, error: { kind: 'unauthorized', code, message } }
+          if (response.status === 403 || code === 'FORBIDDEN' || code === 'PROJECT_ACCESS_DENIED')
+            return { ok: false, error: { kind: 'forbidden', code, message } }
+          if (code === 'REVISION_CONFLICT' || code === 'MEMORY_REVISION_CONFLICT')
+            return { ok: false, error: { kind: 'revision-conflict', code, message } }
+          return { ok: false, error: { kind: 'service', code, message } }
+        }
+        if (envelope.data === undefined || envelope.data === null)
+          return { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '成功响应缺少 data 字段' } }
+        return { ok: true, value: envelope.data as T }
+      }
+      const envelope = successEnvelope(payload)
+      if (envelope === undefined || envelope.data !== null)
+        return { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端错误响应不是有效的统一 envelope' } }
+      const code = String(envelope.code)
+      const message = envelope.message
+      if (response.status === 401 || code === 'UNAUTHORIZED' || code === 'AUTH_REQUIRED' || code === 'TOKEN_EXPIRED' || code === 'TOKEN_REVOKED')
         return { ok: false, error: { kind: 'unauthorized', code, message } }
       if (response.status === 403 || code === 'FORBIDDEN' || code === 'PROJECT_ACCESS_DENIED')
         return { ok: false, error: { kind: 'forbidden', code, message } }
@@ -895,7 +982,7 @@ export class TeamSkillApi {
     } catch (error) {
       return {
         ok: false,
-        error: { kind: 'service', code: 'NETWORK_ERROR', message: error instanceof Error ? error.message : '无法连接 Skill 服务' },
+        error: { kind: 'unavailable', code: 'NETWORK_ERROR', message: error instanceof Error ? error.message : '无法连接 Skill 服务' },
       }
     }
   }
@@ -914,13 +1001,64 @@ export class TeamSkillApi {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+
+function isAuditLogEntry(value: unknown): value is AuditLogEntry {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.occurredAt === 'string' &&
+    typeof value.actor_name === 'string' &&
+    value.actor_name.trim().length > 0 &&
+    typeof value.action === 'string' &&
+    typeof value.skillName === 'string' &&
+    typeof value.version === 'string' &&
+    (value.scope === undefined || value.scope === 'project' || value.scope === 'global') &&
+    (value.result === 'succeeded' || value.result === 'failed' || value.result === 'cancelled') &&
+    typeof value.requestId === 'string'
+  )
+}
+
+function isAuthorizationAudit(value: unknown): value is AuthorizationAudit {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.occurred_at === 'string' &&
+    typeof value.actor_user_id === 'string' &&
+    typeof value.actor_name === 'string' &&
+    value.actor_name.trim().length > 0 &&
+    (value.organization_id === undefined || typeof value.organization_id === 'string') &&
+    (value.target_user_id === undefined || typeof value.target_user_id === 'string') &&
+    (value.project_id === undefined || typeof value.project_id === 'string') &&
+    typeof value.action === 'string' &&
+    (value.result === 'succeeded' || value.result === 'failed') &&
+    (value.error_code === undefined || typeof value.error_code === 'string') &&
+    typeof value.request_id === 'string'
+  )
+}
+
+function successEnvelope(value: unknown): { readonly code: number | string; readonly message: string; readonly request_id: string; readonly data: unknown } | undefined {
+  if (!isRecord(value) || !Object.hasOwn(value, 'data')) return undefined
+  if ((typeof value.code !== 'number' && typeof value.code !== 'string') || typeof value.message !== 'string' || typeof value.request_id !== 'string')
+    return undefined
+  return value as { readonly code: number | string; readonly message: string; readonly request_id: string; readonly data: unknown }
+}
 function isMemoryRecord(value: unknown): value is AdminMemoryRecord {
   return (
     isRecord(value) &&
     typeof value.memory_id === 'string' &&
+    typeof value.team_id === 'string' &&
     typeof value.project_id === 'string' &&
     typeof value.content === 'string' &&
-    typeof value.revision === 'number'
+    value.layer === 'L1' &&
+    typeof value.captured_by_user_id === 'string' &&
+    typeof value.created_at === 'string' &&
+    typeof value.updated_at === 'string' &&
+    typeof value.revision === 'number' &&
+    (value.status === 'ACTIVE' || value.status === 'DELETED') &&
+    typeof value.importance === 'number' &&
+    typeof value.recall_count === 'number' &&
+    (value.last_recalled_at === null || typeof value.last_recalled_at === 'string') &&
+    value.source_kind === 'agent_turn'
   )
 }
 function isMemoryList(value: unknown): value is AdminMemoryList {
@@ -928,8 +1066,103 @@ function isMemoryList(value: unknown): value is AdminMemoryList {
     isRecord(value) &&
     Array.isArray(value.items) &&
     value.items.every(isMemoryRecord) &&
-    (value.next_cursor === null || typeof value.next_cursor === 'string' || value.next_cursor === undefined)
+    (value.next_cursor === null || typeof value.next_cursor === 'string') &&
+    typeof value.total_estimate === 'number' &&
+    Number.isFinite(value.total_estimate)
   )
+}
+
+function isMemoryJob(value: unknown): value is AdminMemoryJob {
+  return (
+    isRecord(value) &&
+    typeof value.job_id === 'string' &&
+    typeof value.event_id === 'string' &&
+    (value.kind === 'CAPTURE' ||
+      value.kind === 'INDEX_REFRESH' ||
+      value.kind === 'DELETE_CLEANUP' ||
+      value.kind === 'PROJECT_PROVISION' ||
+      value.kind === 'POLICY_UPDATE' ||
+      value.kind === 'PROJECT_PURGE') &&
+    typeof value.team_id === 'string' &&
+    typeof value.project_id === 'string' &&
+    typeof value.requested_by_user_id === 'string' &&
+    (value.status === 'PENDING' || value.status === 'SUCCEEDED' || value.status === 'FAILED') &&
+    typeof value.retryable === 'boolean' &&
+    typeof value.retry_count === 'number' &&
+    typeof value.created_at === 'string' &&
+    (value.finished_at === null || typeof value.finished_at === 'string') &&
+    (value.error_code === null || typeof value.error_code === 'string') &&
+    typeof value.revision === 'number'
+  )
+}
+
+function isMemoryAudit(value: unknown): value is AdminMemoryAudit {
+  return (
+    isRecord(value) &&
+    typeof value.audit_id === 'string' &&
+    typeof value.operation === 'string' &&
+    typeof value.operated_by_user_id === 'string' &&
+    (value.role === 'admin' || value.role === 'manager' || value.role === 'member' || value.role === 'system') &&
+    (value.memory_id === null || typeof value.memory_id === 'string') &&
+    typeof value.project_id === 'string' &&
+    typeof value.result === 'string' &&
+    typeof value.event_id === 'string'
+  )
+}
+
+function isMemoryJobList(value: unknown): value is AdminMemoryJobList {
+  return isRecord(value) && Array.isArray(value.items) && value.items.every(isMemoryJob) && (value.next_cursor === null || typeof value.next_cursor === 'string')
+}
+
+function isMemoryAuditList(value: unknown): value is AdminMemoryAuditList {
+  return isRecord(value) && Array.isArray(value.items) && value.items.every(isMemoryAudit) && (value.next_cursor === null || typeof value.next_cursor === 'string')
+}
+
+function parseMemoryMutation(value: unknown): AdminMemoryMutation | undefined {
+  if (!isRecord(value)) return undefined
+  const memory = value.memory === undefined ? undefined : isMemoryRecord(value.memory) ? value.memory : undefined
+  if (value.memory !== undefined && memory === undefined) return undefined
+  if (typeof value.event_id !== 'string' || typeof value.job_id !== 'string') return undefined
+  if (value.status !== 'PENDING' && value.status !== 'INDEX_PENDING') return undefined
+  if (value.accepted_count !== undefined && typeof value.accepted_count !== 'number') return undefined
+  if (value.cleanup_status !== undefined && value.cleanup_status !== 'PENDING' && value.cleanup_status !== 'FAILED') return undefined
+  return {
+    ...(memory === undefined ? {} : { memory }),
+    event_id: value.event_id,
+    job_id: value.job_id,
+    status: value.status,
+    ...(value.accepted_count === undefined ? {} : { accepted_count: value.accepted_count }),
+    ...(value.cleanup_status === undefined ? {} : { cleanup_status: value.cleanup_status }),
+  }
+}
+
+function parseMemoryMutationResult(value: unknown): ApiResult<AdminMemoryMutation> {
+  const mutation = parseMemoryMutation(value)
+  return mutation === undefined
+    ? { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的记忆操作结果' } }
+    : { ok: true, value: mutation }
+}
+
+function parseMemoryPolicyResult(value: unknown): ApiResult<AdminMemoryPolicy> {
+  if (
+    isRecord(value) &&
+    value.scope_type === 'project' &&
+    typeof value.scope_id === 'string' &&
+    typeof value.revision === 'number' &&
+    isRecord(value.values) &&
+    typeof value.values.top_k === 'number' &&
+    typeof value.values.relevance_threshold === 'number' &&
+    typeof value.values.token_budget === 'number' &&
+    (value.inherited_from === 'organization' || value.inherited_from === 'project')
+  )
+    return { ok: true, value: value as unknown as AdminMemoryPolicy }
+  return { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的记忆策略' } }
+}
+
+function parseMemoryJobResult(value: unknown): ApiResult<AdminMemoryJob> {
+  return isMemoryJob(value)
+    ? { ok: true, value }
+    : { ok: false, error: { kind: 'service', code: 'INVALID_RESPONSE', message: '服务端未返回有效的记忆任务' } }
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -940,4 +1173,214 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     return { code: 'INVALID_JSON', message: '服务端返回了无效 JSON' }
   }
+}
+
+const TELEMETRY_KINDS: readonly string[] = [
+  'session.started', 'session.finished', 'turn.started', 'turn.finished', 'step.started', 'step.finished',
+  'llm.request', 'llm.response', 'tool.call', 'tool.result', 'approval.requested', 'approval.resolved',
+  'compaction.completed', 'agent.error', 'delivery.gap',
+]
+
+const TELEMETRY_OUTCOMES: readonly string[] = ['success', 'error', 'interrupted', 'cancelled', 'blocked', 'max_tokens']
+
+const TELEMETRY_GAP_REASONS: readonly string[] = ['overflow', 'expired', 'rejected', 'manual_clear', 'authorization_revoked']
+
+const TELEMETRY_DECISIONS: readonly string[] = ['allowed_once', 'rejected', 'cancelled', 'unavailable']
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && Number.isFinite(value) && value >= 0
+}
+
+function isNullableCount(value: unknown): value is number | null {
+  return value === null || isCount(value)
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
+}
+
+/** Field-by-field guard so a malformed knowledge-base detail can never reach page state. */
+function isKnownKnowledgeBase(value: unknown): value is AdminKnowledgeBase {
+  if (!isRecord(value)) return false
+  const types = ['document', 'faq', 'wiki']
+  const states = ['active', 'unavailable', 'deleting']
+  return (
+    typeof value.knowledge_base_id === 'string' &&
+    typeof value.organization_id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.description === 'string' &&
+    typeof value.type === 'string' &&
+    types.includes(value.type) &&
+    typeof value.state === 'string' &&
+    states.includes(value.state) &&
+    typeof value.searchable === 'boolean' &&
+    typeof value.updated_at === 'string' &&
+    isCount(value.revision) &&
+    (value.document_count === undefined || isCount(value.document_count))
+  )
+}
+
+function isTelemetryDelivery(value: unknown): value is TelemetryDelivery {
+  return (
+    isRecord(value) &&
+    isCount(value.accepted) &&
+    isCount(value.duplicate) &&
+    isCount(value.retryable) &&
+    isCount(value.rejected) &&
+    isCount(value.queued) &&
+    isCount(value.gaps)
+  )
+}
+
+function isTelemetrySummary(value: unknown): value is TelemetrySummary {
+  if (!isRecord(value)) return false
+  if (!isTelemetryDelivery(value.delivery)) return false
+  const sessions = value.sessions
+  const turns = value.turns
+  const steps = value.steps
+  const llm = value.llm
+  const tools = value.tools
+  const approvals = value.approvals
+  if (!isRecord(sessions)) return false
+  if (![sessions.total, sessions.completed, sessions.errors, sessions.interrupted, sessions.cancelled].every(isCount)) return false
+  if (!isRecord(turns)) return false
+  if (![turns.total, turns.completed, turns.errors, turns.blocked, turns.max_tokens, turns.interrupted, turns.cancelled].every(isCount)) return false
+  if (!isNullableCount(turns.p50_duration_ms) || !isNullableCount(turns.p95_duration_ms)) return false
+  if (!isRecord(steps)) return false
+  if (![steps.started, steps.finished].every(isCount)) return false
+  if (!isNullableCount(steps.p50_duration_ms) || !isNullableCount(steps.p95_duration_ms)) return false
+  if (!isRecord(llm)) return false
+  if (
+    ![llm.requests, llm.retries, llm.input_tokens, llm.output_tokens, llm.token_sample_size, llm.input_token_samples, llm.output_token_samples, llm.total_token_samples].every(
+      isCount,
+    )
+  ) {
+    return false
+  }
+  if (!isNullableCount(llm.total_tokens)) return false
+  if (!isRecord(tools)) return false
+  if (![tools.calls, tools.errors].every(isCount)) return false
+  if (!isNullableCount(tools.p50_duration_ms) || !isNullableCount(tools.p95_duration_ms)) return false
+  if (!isRecord(approvals)) return false
+  if (![approvals.requested, approvals.allowed_once, approvals.rejected, approvals.cancelled, approvals.unavailable].every(isCount)) return false
+  if (!isCount(value.compactions)) return false
+  return isTelemetryDelivery(value.delivery)
+}
+
+function isTelemetryBucket(value: unknown): value is TelemetryBucket {
+  return isRecord(value) && typeof value.bucket_start === 'string' && isTelemetrySummary(value)
+}
+
+function isTelemetryModelUsage(value: unknown): value is TelemetryModelUsage {
+  return (
+    isRecord(value) &&
+    typeof value.provider === 'string' &&
+    typeof value.model === 'string' &&
+    isCount(value.requests) &&
+    isCount(value.input_tokens) &&
+    isCount(value.output_tokens) &&
+    isNullableCount(value.total_tokens) &&
+    isCount(value.input_token_samples) &&
+    isCount(value.output_token_samples) &&
+    isCount(value.total_token_samples)
+  )
+}
+
+function isTelemetryToolUsage(value: unknown): value is TelemetryToolUsage {
+  return (
+    isRecord(value) &&
+    typeof value.tool_name === 'string' &&
+    isCount(value.calls) &&
+    isCount(value.errors) &&
+    isNullableCount(value.p50_duration_ms) &&
+    isNullableCount(value.p95_duration_ms)
+  )
+}
+
+function isTelemetryProjectSummary(value: unknown): value is TelemetryProjectSummary {
+  return (
+    isRecord(value) &&
+    typeof value.project_id === 'string' &&
+    typeof value.from === 'string' &&
+    typeof value.to === 'string' &&
+    typeof value.has_data === 'boolean' &&
+    isTelemetrySummary(value.summary) &&
+    Array.isArray(value.models) &&
+    value.models.every(isTelemetryModelUsage) &&
+    Array.isArray(value.tools) &&
+    value.tools.every(isTelemetryToolUsage) &&
+    isTelemetryDelivery(value.delivery) &&
+    isCount(value.retention_days)
+  )
+}
+
+function isTelemetryEventItem(value: unknown): value is TelemetryEventItem {
+  if (!isRecord(value)) return false
+  for (const field of ['event_id', 'installation_id', 'project_id', 'kind', 'occurred_at', 'received_at', 'source_type'] as const) {
+    if (typeof value[field] !== 'string') return false
+  }
+  if (!TELEMETRY_KINDS.includes(value.kind as string)) return false
+  if (!isStringOrNull(value.session_id)) return false
+  if (!isNullableCount(value.source_seq) || !isNullableCount(value.turn) || !isNullableCount(value.step)) return false
+  if (!isNullableCount(value.duration_ms)) return false
+  if (!isStringOrNull(value.outcome) || (typeof value.outcome === 'string' && !TELEMETRY_OUTCOMES.includes(value.outcome))) return false
+  for (const field of ['provider', 'model', 'tool_category', 'compaction_id'] as const) {
+    if (!isStringOrNull(value[field])) return false
+  }
+  for (const field of ['tool_name', 'call_id', 'approval_id'] as const) {
+    if (!isStringOrNull(value[field])) return false
+  }
+  if (value.retryable !== null && typeof value.retryable !== 'boolean') return false
+  if (!isNullableCount(value.retry_count)) return false
+  if (value.token_usage !== null && value.token_usage !== undefined) {
+    const usage = value.token_usage
+    if (!isRecord(usage)) return false
+    if (!isNullableCount(usage.input_tokens) || !isNullableCount(usage.output_tokens) || !isNullableCount(usage.total_tokens)) return false
+  }
+  if (value.error !== null && value.error !== undefined) {
+    const detail = value.error
+    if (!isRecord(detail) || typeof detail.name !== 'string' || !isStringOrNull(detail.code) || !isStringOrNull(detail.summary)) return false
+  }
+  if (value.approval !== null && value.approval !== undefined) {
+    const detail = value.approval
+    if (!isRecord(detail)) return false
+    if (detail.decision !== null && detail.decision !== undefined && !TELEMETRY_DECISIONS.includes(detail.decision as string)) return false
+  }
+  if (value.compaction !== null && value.compaction !== undefined) {
+    const detail = value.compaction
+    if (!isRecord(detail) || !isStringOrNull(detail.kind)) return false
+  }
+  if (value.gap !== null && value.gap !== undefined) {
+    const detail = value.gap
+    if (!isRecord(detail)) return false
+    if (typeof detail.reason !== 'string' || !TELEMETRY_GAP_REASONS.includes(detail.reason)) return false
+    if (!isCount(detail.count)) return false
+    if (!isStringOrNull(detail.first_event_id) || !isStringOrNull(detail.last_event_id)) return false
+  }
+  return true
+}
+
+function isTelemetryOverview(value: unknown): value is TelemetryOverview {
+  return (
+    isRecord(value) &&
+    typeof value.from === 'string' &&
+    typeof value.to === 'string' &&
+    typeof value.has_data === 'boolean' &&
+    isTelemetrySummary(value.summary) &&
+    Array.isArray(value.buckets) &&
+    value.buckets.every(isTelemetryBucket) &&
+    isCount(value.retention_days)
+  )
+}
+
+function isTelemetryEventPage(value: unknown): value is TelemetryEventPage {
+  return (
+    isRecord(value) &&
+    typeof value.project_id === 'string' &&
+    Array.isArray(value.items) &&
+    value.items.every(isTelemetryEventItem) &&
+    (value.next_cursor === null || typeof value.next_cursor === 'string') &&
+    typeof value.has_more === 'boolean' &&
+    isCount(value.retention_days)
+  )
 }

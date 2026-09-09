@@ -1,76 +1,43 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { signIn, signOut } from 'next-auth/react'
-import {
-  BookOpen,
-  CheckCircle2,
-  ChevronDown,
-  Database,
-  FilePenLine,
-  FolderKanban,
-  KeyRound,
-  Library,
-  Plus,
-  RefreshCw,
-  Rocket,
-  Save,
-  ScrollText,
-  ShieldCheck,
-  TriangleAlert,
-  Upload,
-  Users,
-  UserRound,
-  SlidersHorizontal,
-  ScrollText as AuditIcon,
-} from 'lucide-react'
+import { Activity, BookOpen, Building2, CheckCircle2, ChevronDown, Database, FilePenLine, FolderKanban, KeyRound, Library, Plus, RefreshCw, Rocket, Save, ScrollText, ShieldCheck, TriangleAlert, Upload, Users, UserRound, SlidersHorizontal, ScrollText as AuditIcon } from 'lucide-react'
 import { TeamSkillApi, type ApiError, type ApiResult } from '../lib/team-skill-api.ts'
-import type {
-  AccountRole,
-  AdminKnowledgeBase,
-  AdminKnowledgeDocument,
-  AdminMemoryAudit,
-  AdminMemoryJob,
-  AdminMemoryPolicy,
-  AdminMemoryRecord,
-  AdminOrganization,
-  AdminProject,
-  AdminProjectAsset,
-  AdminProjectMember,
-  AdminUser,
-  AuthorizationAudit,
-  AuditLogEntry,
-  DirectoryUser,
-  PermissionDefinition,
-  ReviewItem,
-  RoleDefinition,
-  SkillVersion,
-  TeamSkill,
-} from '../lib/team-skill-types.ts'
+import type { AccountRole, AdminKnowledgeBase, AdminKnowledgeDocument, AdminMemoryAudit, AdminMemoryJob, AdminMemoryPolicy, AdminMemoryRecord, AdminOrganization, AdminProject, AdminProjectAsset, AdminProjectMember, AdminUser, AuthorizationAudit, AuditLogEntry, DirectoryUser, PermissionDefinition, ReviewItem, RoleDefinition, SkillVersion, TeamSkill, TelemetryBucket, TelemetryEventItem, TelemetryEventPage, TelemetryModelUsage, TelemetryOverview, TelemetryProjectSummary, TelemetrySummary, TelemetryToolUsage } from '../lib/team-skill-types.ts'
 
-type PageId =
-  | 'directory'
-  | 'drafts'
-  | 'reviews'
-  | 'releases'
-  | 'audit'
-  | 'knowledge-bases'
-  | 'memory-library'
-  | 'projects'
-  | 'account-users'
-  | 'account-roles'
-  | 'account-projects'
-  | 'account-audit'
-type NavGroup = 'skills' | 'memory' | 'projects' | 'permissions'
+type PageId = 'directory' | 'drafts' | 'reviews' | 'releases' | 'audit' | 'knowledge-bases' | 'memory-library' | 'projects' | 'account-users' | 'account-organizations' | 'account-roles' | 'account-projects' | 'account-audit' | 'telemetry-overview' | 'telemetry-project' | 'telemetry-events'
+type NavGroup = 'skills' | 'memory' | 'projects' | 'permissions' | 'telemetry'
 type Loaded =
   | { readonly page: PageId; readonly state: 'loading' }
-  | { readonly page: PageId; readonly state: 'ready'; readonly value: readonly unknown[] }
-  | { readonly page: PageId; readonly state: 'error'; readonly error: ApiError }
+  | {
+    readonly page: PageId
+    readonly state: 'ready'
+    readonly value: readonly unknown[]
+  }
+  | {
+    readonly page: PageId
+    readonly state: 'error'
+    readonly error: ApiError
+  }
 type NavIcon = typeof Library
-type NavItem = { readonly id: PageId; readonly label: string; readonly hint: string; readonly icon: NavIcon }
-type FutureNavItem = { readonly label: string; readonly hint: string; readonly icon: NavIcon }
+type NavItem = {
+  readonly id: PageId
+  readonly label: string
+  readonly hint: string
+  readonly icon: NavIcon
+}
+type FutureNavItem = {
+  readonly label: string
+  readonly hint: string
+  readonly icon: NavIcon
+}
 export interface DashboardSession {
-  readonly user: { readonly id: string; readonly name?: string | null; readonly email?: string | null }
+  readonly user: {
+    readonly id: string
+    readonly name?: string | null
+    readonly email?: string | null
+  }
   readonly role: AccountRole
   readonly mustChangePassword: boolean
 }
@@ -83,18 +50,84 @@ const NAV: readonly NavItem[] = [
   { id: 'audit', label: '审计日志', hint: '管理员可见', icon: ScrollText },
 ]
 const FUTURE_NAV: readonly FutureNavItem[] = []
-const KNOWLEDGE_NAV: readonly NavItem[] = [{ id: 'knowledge-bases', label: '知识库', hint: '文档、FAQ 与 Wiki', icon: BookOpen }]
+const KNOWLEDGE_NAV: readonly NavItem[] = [
+  {
+    id: 'knowledge-bases',
+    label: '知识库',
+    hint: '文档、FAQ 与 Wiki',
+    icon: BookOpen,
+  },
+]
 const MEMORY_NAV: readonly NavItem[] = [
-  { id: 'memory-library', label: '记忆列表、策略、任务与审计', hint: '项目团队记忆治理', icon: Database },
+  {
+    id: 'memory-library',
+    label: '记忆列表、策略、任务与审计',
+    hint: '项目团队记忆治理',
+    icon: Database,
+  },
 ]
 
-const PROJECT_NAV: readonly NavItem[] = [{ id: 'projects', label: '项目列表', hint: '项目资源与生命周期', icon: FolderKanban }]
+const PROJECT_NAV: readonly NavItem[] = [
+  {
+    id: 'projects',
+    label: '项目列表',
+    hint: '项目资源与生命周期',
+    icon: FolderKanban,
+  },
+]
 
 const PERMISSION_NAV: readonly NavItem[] = [
-  { id: 'account-users', label: '用户与成员', hint: '账号与组织关系', icon: UserRound },
-  { id: 'account-roles', label: '角色与权限', hint: '服务端固定矩阵', icon: KeyRound },
-  { id: 'account-projects', label: '项目授权', hint: '项目成员关系', icon: SlidersHorizontal },
-  { id: 'account-audit', label: '授权审计', hint: '账号与授权事件', icon: AuditIcon },
+  {
+    id: 'account-users',
+    label: '用户与成员',
+    hint: '账号与组织关系',
+    icon: UserRound,
+  },
+  {
+    id: 'account-organizations',
+    label: '组织管理',
+    hint: '组织生命周期与经理绑定',
+    icon: Building2,
+  },
+  {
+    id: 'account-roles',
+    label: '角色与权限',
+    hint: '服务端固定矩阵',
+    icon: KeyRound,
+  },
+  {
+    id: 'account-projects',
+    label: '项目授权',
+    hint: '项目成员关系',
+    icon: SlidersHorizontal,
+  },
+  {
+    id: 'account-audit',
+    label: '授权审计',
+    hint: '账号与授权事件',
+    icon: AuditIcon,
+  },
+]
+
+const TELEMETRY_NAV: readonly NavItem[] = [
+  {
+    id: 'telemetry-overview',
+    label: '总览',
+    hint: '运行与采集管道聚合',
+    icon: Activity,
+  },
+  {
+    id: 'telemetry-project',
+    label: '项目详情',
+    hint: '单项目运行、Token 与工具',
+    icon: FolderKanban,
+  },
+  {
+    id: 'telemetry-events',
+    label: '事件诊断',
+    hint: '结构化事件与数据缺口',
+    icon: ScrollText,
+  },
 ]
 
 /** Login form used by the server-rendered authentication gate. */
@@ -112,7 +145,11 @@ export function AdminLoginPage({ clearStaleSession = false }: { readonly clearSt
     event.preventDefault()
     setBusy(true)
     setError(undefined)
-    const result = await signIn('credentials', { username, password, redirect: false })
+    const result = await signIn('credentials', {
+      username,
+      password,
+      redirect: false,
+    })
     setBusy(false)
     if (result.error !== undefined) {
       setError('用户名或密码错误')
@@ -120,20 +157,7 @@ export function AdminLoginPage({ clearStaleSession = false }: { readonly clearSt
     }
     window.location.reload()
   }
-  return (
-    <AuthPage
-      title="登录团队 Skill 管理后台"
-      description="使用服务端账号登录后才能查看组织、账号和 Skill 数据。"
-      onSubmit={submit}
-      error={error}
-      busy={busy}
-      username={username}
-      password={password}
-      onUsername={setUsername}
-      onPassword={setPassword}
-      submitLabel="登录"
-    />
-  )
+  return <AuthPage title="登录团队 Skill 管理后台" description="使用服务端账号登录后才能查看组织、账号和 Skill 数据。" onSubmit={submit} error={error} busy={busy} username={username} password={password} onUsername={setUsername} onPassword={setPassword} submitLabel="登录" />
 }
 
 /** First-login password change gate; the service never exposes the new password again. */
@@ -154,15 +178,25 @@ export function AdminPasswordChangePage({ username }: { readonly username: strin
     try {
       const response = await fetch('/api/team-skill/auth/change-password', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
-        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+        headers: {
+          'content-type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
       })
       if (!response.ok) {
         setError('密码修改失败，请检查当前密码和新密码')
         setBusy(false)
         return
       }
-      const result = await signIn('credentials', { username, password: newPassword, redirect: false })
+      const result = await signIn('credentials', {
+        username,
+        password: newPassword,
+        redirect: false,
+      })
       if (result.error !== undefined) {
         setError('密码已修改，但重新登录失败')
         setBusy(false)
@@ -253,7 +287,7 @@ function AuthPage({
         <p>{description}</p>
         <form className="auth-form" onSubmit={event => void onSubmit(event)}>
           <label>
-            用户名
+            用户名或邮箱
             <input
               autoComplete="username"
               value={username}
@@ -297,10 +331,14 @@ export function AdminDashboard({ session }: { readonly session?: DashboardSessio
   const effectiveRole: AccountRole = session?.role ?? 'admin'
   const canManagePermissions = effectiveRole !== 'member'
   const canManageKnowledge = effectiveRole !== 'member'
+  const canViewTelemetry = effectiveRole !== 'member'
   const [page, setPage] = useState<PageId>('directory')
   const [routeRevision, setRouteRevision] = useState(0)
   const [expandedGroup, setExpandedGroup] = useState<NavGroup>('skills')
-  const [loaded, setLoaded] = useState<Loaded>({ page: 'directory', state: 'loading' })
+  const [loaded, setLoaded] = useState<Loaded>({
+    page: 'directory',
+    state: 'loading',
+  })
   const [selectedSkill, setSelectedSkill] = useState<TeamSkill | undefined>()
   const [actionMessage, setActionMessage] = useState<string | undefined>()
   const requestSequence = useRef(0)
@@ -330,7 +368,7 @@ export function AdminDashboard({ session }: { readonly session?: DashboardSessio
   useEffect(() => {
     const route = readAdminRoute()
     setPage(route.page)
-    setExpandedGroup(route.page === 'projects' ? 'projects' : route.page === 'memory-library' ? 'memory' : 'skills')
+    setExpandedGroup(route.page === 'projects' ? 'projects' : route.page === 'memory-library' ? 'memory' : route.page.startsWith('telemetry-') ? 'telemetry' : 'skills')
     setRouteRevision(value => value + 1)
   }, [])
   useEffect(() => {
@@ -354,7 +392,9 @@ export function AdminDashboard({ session }: { readonly session?: DashboardSessio
   const showAction = (result: ApiResult<unknown>, success: string): void => {
     if (result.ok) {
       setActionMessage(success)
-      void reload(false)
+      if (page !== 'memory-library') void reload(false)
+    } else if (result.error.kind === 'unauthorized' && session !== undefined) {
+      void signOut({ redirect: true, redirectTo: '/' })
     } else setActionMessage(errorMessage(result.error))
   }
 
@@ -498,49 +538,51 @@ export function AdminDashboard({ session }: { readonly session?: DashboardSessio
                   </div>
                 )}
               </section>
-              <section className="nav-group memory-nav" aria-labelledby="memory-nav-heading">
-                <button
-                  type="button"
-                  className="nav-group-heading"
-                  id="memory-nav-heading"
-                  aria-expanded={expandedGroup === 'memory'}
-                  aria-controls="memory-nav-subitems"
-                  onClick={() => {
-                    setExpandedGroup('memory')
-                  }}
-                >
-                  <Database size={17} aria-hidden="true" />
-                  <span>
-                    <strong>记忆库管理</strong>
-                    <small>项目团队记忆治理</small>
-                  </span>
-                  <ChevronDown className="nav-group-chevron" size={16} aria-hidden="true" />
-                </button>
-                {expandedGroup === 'memory' && (
-                  <div className="nav-subitems" id="memory-nav-subitems" aria-label="记忆库管理子导航">
-                    {MEMORY_NAV.map((item) => {
-                      const Icon = item.icon
-                      return (
-                        <button
-                          type="button"
-                          key={item.id}
-                          className={item.id === page ? 'nav-link active' : 'nav-link'}
-                          aria-current={item.id === page ? 'page' : undefined}
-                          onClick={() => {
-                            selectPage(item.id)
-                          }}
-                        >
-                          <Icon size={16} aria-hidden="true" />
-                          <span>
-                            <strong>{item.label}</strong>
-                            <small>{item.hint}</small>
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </section>
+              {canManageKnowledge && (
+                <section className="nav-group memory-nav" aria-labelledby="memory-nav-heading">
+                  <button
+                    type="button"
+                    className="nav-group-heading"
+                    id="memory-nav-heading"
+                    aria-expanded={expandedGroup === 'memory'}
+                    aria-controls="memory-nav-subitems"
+                    onClick={() => {
+                      setExpandedGroup('memory')
+                    }}
+                  >
+                    <Database size={17} aria-hidden="true" />
+                    <span>
+                      <strong>记忆库管理</strong>
+                      <small>项目团队记忆治理</small>
+                    </span>
+                    <ChevronDown className="nav-group-chevron" size={16} aria-hidden="true" />
+                  </button>
+                  {expandedGroup === 'memory' && (
+                    <div className="nav-subitems" id="memory-nav-subitems" aria-label="记忆库管理子导航">
+                      {MEMORY_NAV.map((item) => {
+                        const Icon = item.icon
+                        return (
+                          <button
+                            type="button"
+                            key={item.id}
+                            className={item.id === page ? 'nav-link active' : 'nav-link'}
+                            aria-current={item.id === page ? 'page' : undefined}
+                            onClick={() => {
+                              selectPage(item.id)
+                            }}
+                          >
+                            <Icon size={16} aria-hidden="true" />
+                            <span>
+                              <strong>{item.label}</strong>
+                              <small>{item.hint}</small>
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </section>
+              )}
               {canManagePermissions && (
                 <section className="nav-group project-nav" aria-labelledby="project-nav-heading">
                   <button
@@ -563,6 +605,51 @@ export function AdminDashboard({ session }: { readonly session?: DashboardSessio
                   {expandedGroup === 'projects' && (
                     <div className="nav-subitems" id="project-nav-subitems" aria-label="项目管理子导航">
                       {PROJECT_NAV.map((item) => {
+                        const Icon = item.icon
+                        return (
+                          <button
+                            type="button"
+                            key={item.id}
+                            className={item.id === page ? 'nav-link active' : 'nav-link'}
+                            aria-current={item.id === page ? 'page' : undefined}
+                            onClick={() => {
+                              selectPage(item.id)
+                            }}
+                          >
+                            <Icon size={16} aria-hidden="true" />
+                            <span>
+                              <strong>{item.label}</strong>
+                              <small>{item.hint}</small>
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </section>
+              )}
+              {canViewTelemetry && (
+                <section className="nav-group telemetry-nav" aria-labelledby="telemetry-nav-heading">
+                  <button
+                    type="button"
+                    className="nav-group-heading"
+                    id="telemetry-nav-heading"
+                    aria-expanded={expandedGroup === 'telemetry'}
+                    aria-controls="telemetry-nav-subitems"
+                    onClick={() => {
+                      setExpandedGroup('telemetry')
+                    }}
+                  >
+                    <Activity size={17} aria-hidden="true" />
+                    <span>
+                      <strong>AI Coding 可观测</strong>
+                      <small>运行、Token 与采集管道</small>
+                    </span>
+                    <ChevronDown className="nav-group-chevron" size={16} aria-hidden="true" />
+                  </button>
+                  {expandedGroup === 'telemetry' && (
+                    <div className="nav-subitems" id="telemetry-nav-subitems" aria-label="AI Coding 可观测子导航">
+                      {TELEMETRY_NAV.map((item) => {
                         const Icon = item.icon
                         return (
                           <button
@@ -656,19 +743,8 @@ export function AdminDashboard({ session }: { readonly session?: DashboardSessio
       <main className="admin-main">
         <header className="admin-header">
           <div>
-            <span className="crumb">
-              团队治理 /{' '}
-              {page === 'projects'
-                ? '项目管理'
-                : page === 'knowledge-bases'
-                  ? '知识库管理'
-                  : page === 'memory-library'
-                    ? '记忆库管理'
-                    : page.startsWith('account-')
-                      ? '权限管理'
-                      : 'Skill 管理'}
-            </span>
-            <h1>{pageLabel(page)}</h1>
+            <span className="crumb">团队治理 / {page === 'projects' ? '项目管理' : page === 'knowledge-bases' ? '知识库管理' : page === 'memory-library' ? '记忆库管理' : page.startsWith('telemetry-') ? 'AI Coding 可观测' : page.startsWith('account-') ? '权限管理' : 'Skill 管理'}</span>
+            <h1>{page === 'projects' ? '项目管理' : pageLabel(page)}</h1>
           </div>
           <div className="header-actions">
             <span className="identity">
@@ -686,58 +762,33 @@ export function AdminDashboard({ session }: { readonly session?: DashboardSessio
         )}
         {(loaded.page !== page || loaded.state === 'loading') && <Loading />}
         {loaded.page === page && loaded.state === 'error' && <ErrorState error={loaded.error} onRetry={() => void reload()} />}
-        {loaded.page === page && loaded.state === 'ready' && page === 'directory' && (
-          <DirectoryPage items={loaded.value as TeamSkill[]} selected={selectedSkill} onSelect={setSelectedSkill} />
-        )}
-        {loaded.page === page && loaded.state === 'ready' && page === 'drafts' && (
-          <DraftsPage items={loaded.value as TeamSkill[]} api={api} onAction={showAction} />
-        )}
-        {loaded.page === page && loaded.state === 'ready' && page === 'reviews' && (
-          <ReviewsPage items={loaded.value as ReviewItem[]} api={api} onAction={showAction} />
-        )}
-        {loaded.page === page && loaded.state === 'ready' && page === 'releases' && (
-          <ReleasesPage items={loaded.value as TeamSkill[]} api={api} onAction={showAction} />
-        )}
+        {loaded.page === page && loaded.state === 'ready' && page === 'directory' && <DirectoryPage items={loaded.value as TeamSkill[]} selected={selectedSkill} onSelect={setSelectedSkill} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'drafts' && <DraftsPage items={loaded.value as TeamSkill[]} api={api} onAction={showAction} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'reviews' && <ReviewsPage items={loaded.value as ReviewItem[]} api={api} onAction={showAction} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'releases' && <ReleasesPage items={loaded.value as TeamSkill[]} api={api} onAction={showAction} />}
         {loaded.page === page && loaded.state === 'ready' && page === 'audit' && <AuditPage items={loaded.value as AuditLogEntry[]} />}
-        {loaded.page === page && loaded.state === 'ready' && page === 'knowledge-bases' && (
-          <KnowledgeBasesPage items={loaded.value as AdminKnowledgeBase[]} api={api} role={effectiveRole} onAction={showAction} />
-        )}
-        {loaded.page === page && loaded.state === 'ready' && page === 'memory-library' && (
-          <MemoryLibraryPage
-            items={loaded.value as AdminMemoryRecord[]}
-            api={api}
-            role={effectiveRole}
-            userId={session?.user.id}
-            onAction={showAction}
-          />
-        )}
-        {loaded.page === page && loaded.state === 'ready' && page === 'account-users' && (
-          <UsersPage items={loaded.value as AdminUser[]} api={api} role={effectiveRole} onAction={showAction} />
-        )}
+        {loaded.page === page && loaded.state === 'ready' && page === 'knowledge-bases' && <KnowledgeBasesPage items={loaded.value as AdminKnowledgeBase[]} api={api} role={effectiveRole} onAction={showAction} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'memory-library' && <MemoryLibraryPage items={loaded.value as AdminMemoryRecord[]} api={api} role={effectiveRole} userId={session?.user.id} onAction={showAction} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'account-users' && <UsersPage items={loaded.value as AdminUser[]} api={api} role={effectiveRole} onAction={showAction} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'account-organizations' && <OrganizationManagementPage items={loaded.value as AdminOrganization[]} api={api} role={effectiveRole} onAction={showAction} />}
         {loaded.page === page && loaded.state === 'ready' && page === 'account-roles' && <RolesPage api={api} role={effectiveRole} />}
-        {loaded.page === page && loaded.state === 'ready' && page === 'account-projects' && (
-          <ProjectsPage items={loaded.value as AdminProject[]} api={api} role={effectiveRole} onAction={showAction} />
-        )}
-        {loaded.page === page && loaded.state === 'ready' && page === 'projects' && (
-          <ProjectManagementPage
-            key={routeRevision}
-            items={loaded.value as AdminProject[]}
-            api={api}
-            role={effectiveRole}
-            onAction={showAction}
-            route={readAdminRoute()}
-          />
-        )}
-        {loaded.page === page && loaded.state === 'ready' && page === 'account-audit' && (
-          <AuthorizationAuditPage items={loaded.value as AuthorizationAudit[]} api={api} role={effectiveRole} />
-        )}
+        {loaded.page === page && loaded.state === 'ready' && page === 'account-projects' && <ProjectsPage items={loaded.value as AdminProject[]} api={api} role={effectiveRole} onAction={showAction} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'projects' && <ProjectManagementPage key={routeRevision} items={loaded.value as AdminProject[]} api={api} role={effectiveRole} onAction={showAction} route={readAdminRoute()} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'account-audit' && <AuthorizationAuditPage items={loaded.value as AuthorizationAudit[]} api={api} role={effectiveRole} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'telemetry-overview' && <TelemetryOverviewPage api={api} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'telemetry-project' && <TelemetryProjectPage api={api} />}
+        {loaded.page === page && loaded.state === 'ready' && page === 'telemetry-events' && <TelemetryEventsPage api={api} />}
       </main>
     </div>
   )
 }
 
 type ProjectTab = 'overview' | 'members' | 'assets' | 'audit'
-type AdminRoute = { readonly page: PageId; readonly projectId?: string; readonly tab?: ProjectTab }
+type AdminRoute = {
+  readonly page: PageId
+  readonly projectId?: string
+  readonly tab?: ProjectTab
+}
 
 function readAdminRoute(): AdminRoute {
   if (typeof window === 'undefined') return { page: 'directory' }
@@ -768,23 +819,72 @@ async function loadPage(api: TeamSkillApi, page: PageId, role: AccountRole): Pro
   if (page === 'reviews') return api.listReviews()
   if (page === 'audit') return api.listAuditLogs()
   if (page === 'knowledge-bases') return api.listKnowledgeBases()
-  if (page === 'memory-library' && role === 'member') return Promise.resolve({ ok: true, value: [] })
-  if (page === 'memory-library')
-    return api.listMemoryRecords().then(result => (result.ok ? { ok: true, value: result.value.items } : result))
+  if (page === 'memory-library' && role === 'member')
+    return Promise.resolve({
+      ok: false,
+      error: {
+        kind: 'forbidden',
+        code: 'MEMORY_ADMIN_FORBIDDEN',
+        message: '成员不能访问后台记忆库治理',
+      },
+    })
+  if (page === 'memory-library') return Promise.resolve({ ok: true, value: [] })
+  if (page.startsWith('telemetry-') && role === 'member')
+    return Promise.resolve({
+      ok: false,
+      error: {
+        kind: 'forbidden',
+        code: 'ROLE_FORBIDDEN',
+        message: '成员角色不开放团队可观测页面',
+      },
+    })
+  if (page.startsWith('telemetry-')) return Promise.resolve({ ok: true, value: [] })
   if (page === 'account-users') return api.listUsers()
-  if (page === 'account-projects' || page === 'projects') return api.listProjects()
+  if (page === 'account-organizations') return api.listOrganizations()
+  if (page === 'account-projects') {
+    return Promise.all([api.listProjects(), api.listProjects({ status: 'archived' })]).then(([active, archived]) => {
+      if (!active.ok) return active
+      if (!archived.ok) return archived
+      const rows = new Map(active.value.map(item => [item.project_id, item]))
+      for (const item of archived.value) rows.set(item.project_id, item)
+      return { ok: true, value: [...rows.values()] }
+    })
+  }
+  if (page === 'projects') return api.listProjects()
   if (page === 'account-audit') return api.listAuthorizationAudits()
   return api.listRoles()
 }
 
 function pageLabel(page: PageId): string {
-  return (
-    [...NAV, ...KNOWLEDGE_NAV, ...MEMORY_NAV, ...PROJECT_NAV, ...PERMISSION_NAV].find(item => item.id === page)?.label ??
-    (page === 'memory-library' ? '记忆列表、策略、任务与审计' : '管理后台')
-  )
+  return [...NAV, ...KNOWLEDGE_NAV, ...MEMORY_NAV, ...PROJECT_NAV, ...PERMISSION_NAV, ...TELEMETRY_NAV].find(item => item.id === page)?.label ?? (page === 'memory-library' ? '记忆列表、策略、任务与审计' : '管理后台')
 }
 function roleLabel(role: AccountRole): string {
   return role === 'admin' ? '平台管理员' : role === 'manager' ? '组织经理' : '成员'
+}
+
+function roleScopeLabel(scope: string): string {
+  return scope === 'platform' ? '平台' : scope === 'organization' ? '组织' : scope === 'assigned' ? '已分配资源' : scope
+}
+
+function roleDescription(role: AccountRole, description: string): string {
+  if (description.trim().length > 0) return description
+  return role === 'admin' ? '管理平台全部组织、账号和项目' : role === 'manager' ? '管理自己组织内的账号和项目' : '使用被分配的组织、项目和资源'
+}
+
+function projectStatusLabel(status: AdminProject['status']): string {
+  return status === 'draft' ? '草稿' : status === 'active' ? '正常' : '已归档'
+}
+
+function permissionKeyLabel(key: string): string {
+  return key === 'organization.read'
+    ? '组织查看'
+    : key === 'user.manage'
+      ? '账号与成员管理'
+      : key === 'project.manage'
+        ? '项目管理'
+        : key === 'authorization_audit.read'
+          ? '授权审计查看'
+          : key
 }
 
 function UsersPage({
@@ -805,6 +905,8 @@ function UsersPage({
   const [newRole, setNewRole] = useState<'manager' | 'member'>('member')
   const [busyId, setBusyId] = useState<string | undefined>()
   const [initialPassword, setInitialPassword] = useState<string | undefined>()
+  const [membershipTargets, setMembershipTargets] = useState<Record<string, string | undefined>>({})
+  const [askConfirmation, confirmationDialog] = useConfirmDialog()
 
   useEffect(() => {
     void api.listOrganizations().then((result) => {
@@ -824,7 +926,12 @@ function UsersPage({
     setBusyId('create')
     setInitialPassword(undefined)
     const result = await api.createUser(
-      { username: username.trim(), displayName: displayName.trim(), organizationIds: [organizationId], globalRole: newRole },
+      {
+        username: username.trim(),
+        displayName: displayName.trim(),
+        organizationIds: [organizationId],
+        globalRole: newRole,
+      },
       crypto.randomUUID(),
     )
     setBusyId(undefined)
@@ -837,141 +944,390 @@ function UsersPage({
   }
   const updateStatus = async (user: AdminUser): Promise<void> => {
     const next = user.status === 'active' ? 'suspended' : 'active'
-    if (!window.confirm(`${next === 'suspended' ? '停用' : '恢复'}账号 ${user.display_name}？`)) return
+    if (
+      !(await askConfirmation({
+        title: '确认账号操作',
+        message: `${next === 'suspended' ? '停用' : '恢复'}账号 ${user.display_name}？`,
+      }))
+    )
+      return
     setBusyId(user.user_id)
     const result = await api.updateUser(user.user_id, { status: next }, user.revision, crypto.randomUUID())
     setBusyId(undefined)
     onAction(result, next === 'suspended' ? '账号已停用' : '账号已恢复')
   }
   const removeMembership = async (user: AdminUser, membership: NonNullable<AdminUser['memberships']>[number]): Promise<void> => {
-    if (!window.confirm(`从 ${membership.organization_name} 移除 ${user.display_name}？`)) return
+    if (
+      !(await askConfirmation({
+        title: '确认成员操作',
+        message: `从 ${membership.organization_name} 移除 ${user.display_name}？`,
+      }))
+    )
+      return
     setBusyId(`${user.user_id}-${membership.organization_id}`)
     const result = await api.removeMembership(membership.organization_id, user.user_id, membership.revision, crypto.randomUUID())
     setBusyId(undefined)
     onAction(result, '成员关系已移除')
   }
+  const renameUser = async (user: AdminUser): Promise<void> => {
+    const next = window.prompt('新的显示名称', user.display_name)
+    if (next === null || next.trim().length === 0 || next.trim() === user.display_name) return
+    setBusyId(`${user.user_id}-rename`)
+    const result = await api.updateUser(user.user_id, { displayName: next.trim() }, user.revision, crypto.randomUUID())
+    setBusyId(undefined)
+    onAction(result, '显示名已更新')
+  }
+  const addMembership = async (user: AdminUser): Promise<void> => {
+    const target = membershipTargets[user.user_id]
+    if (target === undefined || target.length === 0) return
+    setBusyId(`${user.user_id}-join`)
+    const result = await api.setMembership(target, user.user_id, undefined, crypto.randomUUID())
+    setBusyId(undefined)
+    onAction(result, '成员关系已新增')
+  }
   return (
-    <section className="page-body">
-      <div className="page-intro">
-        <div>
-          <span className="eyebrow">权限管理 / 账号</span>
-          <h2>用户与成员</h2>
-          <p>账号只有一个全局角色，组织成员关系只记录归属和状态。</p>
+    <>
+      <section className="page-body">
+        <div className="page-intro">
+          <div>
+            <span className="eyebrow">权限管理 / 账号</span>
+            <h2>用户与成员</h2>
+            <p>账号只有一个全局角色，组织成员关系只记录归属和状态。</p>
+          </div>
+          <span className="count-badge">{visible.length} 个账号</span>
         </div>
-        <span className="count-badge">{visible.length} 个账号</span>
-      </div>
-      <div className="account-toolbar">
-        <label>
-          组织
-          <select
-            value={organizationId}
-            onChange={(event) => {
-              setOrganizationId(event.target.value)
-            }}
-          >
-            <option value="">全部可见组织</option>
-            {organizations.map(item => (
-              <option key={item.organization_id} value={item.organization_id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <form className="inline-create" onSubmit={event => void create(event)}>
-          <input
-            aria-label="新账号用户名"
-            placeholder="新账号邮箱"
-            value={username}
-            onChange={(event) => {
-              setUsername(event.target.value)
-            }}
-            required
-          />
-          <input
-            aria-label="新账号显示名"
-            placeholder="显示名称"
-            value={displayName}
-            onChange={(event) => {
-              setDisplayName(event.target.value)
-            }}
-            required
-          />
-          <select
-            aria-label="新账号角色"
-            value={newRole}
-            onChange={(event) => {
-              setNewRole(event.target.value as 'manager' | 'member')
-            }}
-          >
-            <option value="member">member</option>
-            {role === 'admin' && <option value="manager">manager</option>}
-          </select>
-          <button className="button primary" disabled={busyId === 'create' || organizationId.length === 0}>
-            <Plus size={14} />
-            创建账号
-          </button>
-        </form>
-      </div>
-      {initialPassword !== undefined && (
-        <div className="one-time-secret" role="status">
-          <strong>一次性初始密码</strong>
-          <code>{initialPassword}</code>
-          <span>只显示这一次，请通过安全渠道交付。</span>
+        <div className="account-toolbar">
+          <label>
+            组织
+            <select
+              value={organizationId}
+              onChange={(event) => {
+                setOrganizationId(event.target.value)
+              }}
+            >
+              <option value="">全部可见组织</option>
+              {organizations.map(item => (
+                <option key={item.organization_id} value={item.organization_id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <form className="inline-create" onSubmit={event => void create(event)}>
+            <input
+              aria-label="新账号用户名"
+              placeholder="新账号邮箱"
+              value={username}
+              onChange={(event) => {
+                setUsername(event.target.value)
+              }}
+              required
+            />
+            <input
+              aria-label="新账号显示名"
+              placeholder="显示名称"
+              value={displayName}
+              onChange={(event) => {
+                setDisplayName(event.target.value)
+              }}
+              required
+            />
+            <select
+              aria-label="新账号角色"
+              value={newRole}
+              onChange={(event) => {
+                setNewRole(event.target.value as 'manager' | 'member')
+              }}
+            >
+              <option value="member">member</option>
+              {role === 'admin' && <option value="manager">manager</option>}
+            </select>
+            <button className="button primary" disabled={busyId === 'create' || organizationId.length === 0}>
+              <Plus size={14} />
+              创建账号
+            </button>
+          </form>
         </div>
-      )}
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>账号</th>
-              <th>全局角色 / 组织</th>
-              <th>状态</th>
-              <th>修订</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map(user => (
-              <tr key={user.user_id}>
-                <td>
-                  <strong>{user.display_name}</strong>
-                  <small>{user.username}</small>
-                </td>
-                <td>
-                  <strong>{user.global_role}</strong>
-                  {user.memberships?.map(membership => (
-                    <div className="membership-row" key={membership.organization_id}>
-                      <span>
-                        {membership.organization_name} · {membership.status === 'active' ? '正常' : '已停用'}
-                      </span>
-                      <button type="button" className="text-danger" onClick={() => void removeMembership(user, membership)}>
-                        移除
+        {initialPassword !== undefined && (
+          <div className="one-time-secret" role="status">
+            <strong>一次性初始密码</strong>
+            <code>{initialPassword}</code>
+            <span>只显示这一次，请通过安全渠道交付。</span>
+          </div>
+        )}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>账号</th>
+                <th>全局角色 / 组织</th>
+                <th>状态</th>
+                <th>修订</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map(user => (
+                <tr key={user.user_id}>
+                  <td>
+                    <strong>{user.display_name}</strong>
+                    <small>{user.username}</small>
+                  </td>
+                  <td>
+                    <strong>{user.global_role}</strong>
+                    {user.memberships?.map(membership => (
+                      <div className="membership-row" key={membership.organization_id}>
+                        <span>
+                          {membership.organization_name} · {membership.status === 'active' ? '正常' : '已停用'}
+                        </span>
+                        <button type="button" className="text-danger" onClick={() => void removeMembership(user, membership)}>
+                          移除
+                        </button>
+                      </div>
+                    )) ?? '未加入组织'}
+                  </td>
+                  <td>
+                    <span className={`status status-${user.status}`}>{user.status === 'active' ? '正常' : '已停用'}</span>
+                    {user.must_change_password && <small>待首次改密</small>}
+                  </td>
+                  <td className="revision">r{user.revision}</td>
+                  <td>
+                    <div className="membership-row">
+                      <button type="button" className="button secondary" disabled={busyId === user.user_id} onClick={() => void updateStatus(user)}>
+                        {user.status === 'active' ? '停用' : '恢复'}
+                      </button>
+                      <button type="button" className="button secondary" disabled={busyId === `${user.user_id}-rename`} onClick={() => void renameUser(user)}>
+                        编辑显示名
                       </button>
                     </div>
-                  )) ?? '未加入组织'}
-                </td>
-                <td>
-                  <span className={`status status-${user.status}`}>{user.status === 'active' ? '正常' : '已停用'}</span>
-                  {user.must_change_password && <small>待首次改密</small>}
-                </td>
-                <td className="revision">r{user.revision}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="button secondary"
-                    disabled={busyId === user.user_id}
-                    onClick={() => void updateStatus(user)}
-                  >
-                    {user.status === 'active' ? '停用' : '恢复'}
-                  </button>
-                </td>
+                    <div className="membership-row">
+                      <select
+                        aria-label={`为 ${user.display_name} 新增组织`}
+                        value={membershipTargets[user.user_id] ?? ''}
+                        onChange={(event) => {
+                          setMembershipTargets(current => ({
+                            ...current,
+                            [user.user_id]: event.target.value,
+                          }))
+                        }}
+                      >
+                        <option value="">选择组织</option>
+                        {organizations
+                          .filter(organization => !user.memberships?.some(item => item.organization_id === organization.organization_id))
+                          .map(organization => (
+                            <option key={organization.organization_id} value={organization.organization_id}>
+                              {organization.name}
+                            </option>
+                          ))}
+                      </select>
+                      <button type="button" className="button secondary" disabled={(membershipTargets[user.user_id] ?? '').length === 0 || busyId === `${user.user_id}-join`} onClick={() => void addMembership(user)}>
+                        新增组织成员
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {visible.length === 0 && <Empty text="当前范围没有可见账号" />}
+        </div>
+      </section>
+      {confirmationDialog}
+    </>
+  )
+}
+
+/** Organization lifecycle, rename, archive and manager binding for platform administrators. */
+function OrganizationManagementPage({
+  items,
+  api,
+  role,
+  onAction,
+}: {
+  readonly items: readonly AdminOrganization[]
+  readonly api: TeamSkillApi
+  readonly role: AccountRole
+  readonly onAction: (result: ApiResult<unknown>, success: string) => void
+}) {
+  const [name, setName] = useState('')
+  const [managerUserId, setManagerUserId] = useState('')
+  const [busyId, setBusyId] = useState<string | undefined>()
+  const [managerTargets, setManagerTargets] = useState<Record<string, string | undefined>>({})
+  const [managers, setManagers] = useState<readonly AdminUser[]>([])
+  const [askConfirmation, confirmationDialog] = useConfirmDialog()
+  const canManage = role === 'admin'
+
+  useEffect(() => {
+    void api.listUsers().then((result) => {
+      if (result.ok) setManagers(result.value.filter(user => user.global_role === 'manager'))
+      else onAction(result, '读取经理列表失败')
+    })
+  }, [api, onAction])
+
+  const create = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    if (name.trim().length === 0) return
+    setBusyId('create')
+    const result = await api.createOrganization(name.trim(), managerUserId.length === 0 ? undefined : managerUserId, crypto.randomUUID())
+    setBusyId(undefined)
+    if (result.ok) {
+      setName('')
+      setManagerUserId('')
+    }
+    onAction(result, '组织已创建')
+  }
+  const rename = async (organization: AdminOrganization): Promise<void> => {
+    const next = window.prompt('新的组织名称', organization.name)
+    if (next === null || next.trim().length === 0 || next.trim() === organization.name) return
+    setBusyId(organization.organization_id + '-rename')
+    const result = await api.updateOrganization(
+      organization.organization_id,
+      { name: next.trim() },
+      organization.revision,
+      crypto.randomUUID(),
+    )
+    setBusyId(undefined)
+    onAction(result, '组织名称已更新')
+  }
+  const setStatus = async (organization: AdminOrganization, status: 'active' | 'archived'): Promise<void> => {
+    if (
+      !(await askConfirmation({
+        title: '确认组织操作',
+        message: status === 'archived' ? '归档组织 ' + organization.name + '？' : '恢复组织 ' + organization.name + '？',
+      }))
+    )
+      return
+    setBusyId(organization.organization_id + '-status')
+    const result = await api.updateOrganization(organization.organization_id, { status }, organization.revision, crypto.randomUUID())
+    setBusyId(undefined)
+    onAction(result, status === 'archived' ? '组织已归档' : '组织已恢复')
+  }
+  const bindManager = async (organization: AdminOrganization): Promise<void> => {
+    const managerId = managerTargets[organization.organization_id]
+    if (managerId === undefined || managerId.length === 0) return
+    setBusyId(organization.organization_id + '-manager')
+    const result = await api.setMembership(organization.organization_id, managerId, undefined, crypto.randomUUID())
+    setBusyId(undefined)
+    onAction(result, '经理已绑定到组织')
+  }
+
+  return (
+    <>
+      <section className="page-body">
+        <div className="page-intro">
+          <div>
+            <span className="eyebrow">权限管理 / 组织</span>
+            <h2>组织管理</h2>
+            <p>组织生命周期与经理绑定由服务端 revision 和幂等键保护。</p>
+          </div>
+          <span className="count-badge">{items.length} 个组织</span>
+        </div>
+        {canManage ? (
+          <form
+            className="account-toolbar"
+            onSubmit={(event) => {
+              void create(event)
+            }}
+          >
+            <input
+              aria-label="新组织名称"
+              placeholder="组织名称"
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value)
+              }}
+              required
+            />
+            <select
+              aria-label="新组织经理"
+              value={managerUserId}
+              onChange={(event) => {
+                setManagerUserId(event.target.value)
+              }}
+            >
+              <option value="">暂不绑定经理</option>
+              {managers.map(manager => (
+                <option key={manager.user_id} value={manager.user_id}>
+                  {manager.display_name}
+                </option>
+              ))}
+            </select>
+            <button className="button primary" disabled={busyId === 'create' || name.trim().length === 0}>
+              <Plus size={14} />
+              创建组织
+            </button>
+          </form>
+        ) : (
+          <p className="page-hint">组织生命周期操作仅平台管理员可用。</p>
+        )}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>组织</th>
+                <th>状态</th>
+                <th>修订</th>
+                <th>操作</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {visible.length === 0 && <Empty text="当前范围没有可见账号" />}
-      </div>
-    </section>
+            </thead>
+            <tbody>
+              {items.map(organization => (
+                <tr key={organization.organization_id}>
+                  <td>
+                    <strong>{organization.name}</strong>
+                    <small>{organization.organization_id}</small>
+                  </td>
+                  <td>
+                    <span className={'status status-' + (organization.status === 'active' ? 'active' : 'archived')}>{organization.status === 'active' ? '正常' : '已归档'}</span>
+                  </td>
+                  <td className="revision">r{organization.revision}</td>
+                  <td>
+                    {canManage && (
+                      <div className="membership-row">
+                        <button type="button" className="button secondary" disabled={busyId === organization.organization_id + '-rename'} onClick={() => void rename(organization)}>
+                          重命名
+                        </button>
+                        <button type="button" className="button secondary" disabled={busyId === organization.organization_id + '-status'} onClick={() => void setStatus(organization, organization.status === 'active' ? 'archived' : 'active')}>
+                          {organization.status === 'active' ? '归档' : '恢复'}
+                        </button>
+                      </div>
+                    )}
+                    {canManage && (
+                      <div className="membership-row">
+                        <select
+                          aria-label={'为 ' + organization.name + ' 绑定经理'}
+                          value={managerTargets[organization.organization_id] ?? ''}
+                          onChange={(event) => {
+                            setManagerTargets(current => ({
+                              ...current,
+                              [organization.organization_id]: event.target.value,
+                            }))
+                          }}
+                        >
+                          <option value="">选择经理账号</option>
+                          {managers
+                            .filter(manager => !manager.memberships?.some(item => item.organization_id === organization.organization_id && item.status === 'active'))
+                            .map(manager => (
+                              <option key={manager.user_id} value={manager.user_id}>
+                                {manager.display_name}
+                              </option>
+                            ))}
+                        </select>
+                        <button type="button" className="button secondary" disabled={(managerTargets[organization.organization_id] ?? '').length === 0 || busyId === organization.organization_id + '-manager'} onClick={() => void bindManager(organization)}>
+                          绑定经理
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {items.length === 0 && <Empty text="当前没有可见组织" />}
+        </div>
+      </section>
+      {confirmationDialog}
+    </>
   )
 }
 
@@ -1018,10 +1374,10 @@ function RolesPage({ api, role }: { readonly api: TeamSkillApi; readonly role: A
                 {roles.map(item => (
                   <tr key={item.role}>
                     <td>
-                      <strong>{item.role}</strong>
+                      <strong>{roleLabel(item.role)}</strong>
                     </td>
-                    <td>{item.scope}</td>
-                    <td>{item.description}</td>
+                    <td>{roleScopeLabel(item.scope)}</td>
+                    <td>{roleDescription(item.role, item.description)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1042,6 +1398,7 @@ function RolesPage({ api, role }: { readonly api: TeamSkillApi; readonly role: A
                   <tr key={item.key}>
                     <td>
                       <code>{item.key}</code>
+                      <small>{permissionKeyLabel(item.key)}</small>
                     </td>
                     <td>{permissionLabel(item.admin)}</td>
                     <td>{permissionLabel(item.manager)}</td>
@@ -1086,7 +1443,11 @@ function ProjectManagementPage({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [creating, setCreating] = useState(false)
+  const [transitionAction, setTransitionAction] = useState<'activate' | 'archive'>()
+  const [transitionBusy, setTransitionBusy] = useState(false)
   const [rows, setRows] = useState<readonly AdminProject[]>(items)
+  const listGeneration = useRef(0)
+  const detailGeneration = useRef(0)
 
   useEffect(() => {
     void api.listOrganizations().then((result) => {
@@ -1100,6 +1461,7 @@ function ProjectManagementPage({
     setRows(items)
   }, [items])
   useEffect(() => {
+    const generation = ++listGeneration.current
     const timer = window.setTimeout(() => {
       void api
         .listProjects({
@@ -1108,7 +1470,7 @@ function ProjectManagementPage({
           ...(query.trim().length === 0 ? {} : { name: query.trim() }),
         })
         .then((result) => {
-          if (result.ok) setRows(result.value)
+          if (result.ok && generation === listGeneration.current) setRows(result.value)
         })
     }, 0)
     return () => {
@@ -1116,12 +1478,14 @@ function ProjectManagementPage({
     }
   }, [api, filterOrganizationId, query, status])
   useEffect(() => {
+    const generation = ++detailGeneration.current
     if (selectedId === undefined) {
       setDetail(undefined)
       return
     }
     setLoadingDetail(true)
     void api.getProject(selectedId).then((result) => {
+      if (generation !== detailGeneration.current) return
       setLoadingDetail(false)
       if (result.ok) {
         setDetail(result.value)
@@ -1155,13 +1519,17 @@ function ProjectManagementPage({
     onAction(result, '项目已保存')
     if (result.ok) setDetail(result.value)
   }
-  const transition = async (action: 'activate' | 'archive'): Promise<void> => {
-    if (detail === undefined || !window.confirm(action === 'activate' ? '确认激活该项目？' : '归档后项目不可恢复，确认归档？')) return
-    const result =
-      action === 'activate'
-        ? await api.activateProject(detail.project_id, detail.revision, crypto.randomUUID())
-        : await api.archiveProject(detail.project_id, detail.revision, crypto.randomUUID())
-    onAction(result, action === 'activate' ? '项目已激活' : '项目已归档')
+  const transition = (action: 'activate' | 'archive'): void => {
+    if (detail === undefined) return
+    setTransitionAction(action)
+  }
+  const confirmTransition = async (): Promise<void> => {
+    if (detail === undefined || transitionAction === undefined) return
+    setTransitionBusy(true)
+    const result = transitionAction === 'activate' ? await api.activateProject(detail.project_id, detail.revision, crypto.randomUUID()) : await api.archiveProject(detail.project_id, detail.revision, crypto.randomUUID())
+    setTransitionBusy(false)
+    setTransitionAction(undefined)
+    onAction(result, transitionAction === 'activate' ? '项目已激活' : '项目已归档')
     if (result.ok) setDetail(result.value)
   }
   const selectProject = (projectId: string): void => {
@@ -1174,140 +1542,155 @@ function ProjectManagementPage({
     if (selectedId !== undefined) navigateProjectRoute(selectedId, next)
   }
   return (
-    <section className="page-body">
-      <div className="page-intro">
-        <div>
-          <span className="eyebrow">项目管理</span>
-          <h2>项目列表</h2>
-          <p>{roleLabel(role)}可在服务端授权范围内管理项目资源和生命周期。</p>
+    <>
+      <section className="page-body">
+        <div className="page-intro">
+          <div>
+            <span className="eyebrow">项目管理</span>
+            <h2>项目列表</h2>
+            <p>{roleLabel(role)}可在服务端授权范围内管理项目资源和生命周期。</p>
+          </div>
+          <span className="count-badge">{filtered.length} 个项目</span>
         </div>
-        <span className="count-badge">{filtered.length} 个项目</span>
-      </div>
-      <div className="account-toolbar">
-        <label>
-          组织
-          <select
-            aria-label="项目组织筛选"
-            value={filterOrganizationId}
-            onChange={(event) => {
-              setFilterOrganizationId(event.target.value)
-            }}
-          >
-            <option value="">全部可见组织</option>
-            {organizations.map(item => (
-              <option key={item.organization_id} value={item.organization_id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          状态
-          <select
-            aria-label="项目状态筛选"
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value as '' | AdminProject['status'])
-            }}
-          >
-            <option value="">草稿与 active</option>
-            <option value="draft">draft</option>
-            <option value="active">active</option>
-            <option value="archived">archived</option>
-          </select>
-        </label>
-        <label>
-          名称
-          <input
-            aria-label="项目名称筛选"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value)
-            }}
-            placeholder="搜索项目名称"
-          />
-        </label>
-        <form className="inline-create" onSubmit={event => void create(event)}>
-          <select
-            aria-label="创建项目所属组织"
-            value={organizationId}
-            onChange={(event) => {
-              setOrganizationId(event.target.value)
-            }}
-          >
-            {organizations.map(item => (
-              <option key={item.organization_id} value={item.organization_id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <input
-            aria-label="项目名称"
-            value={name}
-            onChange={(event) => {
-              setName(event.target.value)
-            }}
-            placeholder="新项目名称"
-            required
-          />
-          <input
-            aria-label="项目描述"
-            value={description}
-            onChange={(event) => {
-              setDescription(event.target.value)
-            }}
-            placeholder="项目描述（可选）"
-          />
-          <button className="button primary" disabled={creating || organizationId.length === 0}>
-            <Plus size={14} />
-            创建项目
-          </button>
-        </form>
-      </div>
-      <div className="project-layout">
-        <div className="project-list">
-          {filtered.map(project => (
-            <button
-              type="button"
-              key={project.project_id}
-              className={project.project_id === selectedId ? 'project-row selected-project' : 'project-row'}
-              onClick={() => {
-                selectProject(project.project_id)
+        <div className="account-toolbar">
+          <label>
+            组织
+            <select
+              aria-label="项目组织筛选"
+              value={filterOrganizationId}
+              onChange={(event) => {
+                setFilterOrganizationId(event.target.value)
               }}
             >
-              <strong>{project.name}</strong>
-              <small>
-                {project.organization_name ?? project.organization_id} · r{project.revision} ·{' '}
-                {project.updated_at === undefined ? '' : formatDate(project.updated_at)}
-              </small>
-              <span className={`status status-${project.status}`}>{project.status}</span>
+              <option value="">全部可见组织</option>
+              {organizations.map(item => (
+                <option key={item.organization_id} value={item.organization_id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            状态
+            <select
+              aria-label="项目状态筛选"
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value as '' | AdminProject['status'])
+              }}
+            >
+              <option value="">默认：草稿和正常</option>
+              <option value="draft">草稿</option>
+              <option value="active">正常</option>
+              <option value="archived">已归档</option>
+            </select>
+          </label>
+          <label>
+            名称
+            <input
+              aria-label="项目名称筛选"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value)
+              }}
+              placeholder="搜索项目名称"
+            />
+          </label>
+          <form className="inline-create" onSubmit={event => void create(event)}>
+            <select
+              aria-label="创建项目所属组织"
+              value={organizationId}
+              onChange={(event) => {
+                setOrganizationId(event.target.value)
+              }}
+            >
+              {organizations.map(item => (
+                <option key={item.organization_id} value={item.organization_id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="项目名称"
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value)
+              }}
+              placeholder="新项目名称"
+              required
+            />
+            <input
+              aria-label="项目描述"
+              value={description}
+              onChange={(event) => {
+                setDescription(event.target.value)
+              }}
+              placeholder="项目描述（可选）"
+            />
+            <button className="button primary" disabled={creating || organizationId.length === 0}>
+              <Plus size={14} />
+              创建项目
             </button>
-          ))}
-          {filtered.length === 0 && <Empty text="当前筛选没有可见项目" />}
+          </form>
         </div>
-        {selectedId !== undefined && (
-          <div className="detail-panel project-detail-panel">
-            {loadingDetail || detail === undefined ? (
-              <Loading />
-            ) : (
-              <ProjectDetail
-                detail={detail}
-                tab={tab}
-                setTab={selectTab}
-                name={name}
-                description={description}
-                onName={setName}
-                onDescription={setDescription}
-                onSave={() => void save()}
-                onTransition={action => void transition(action)}
-                api={api}
-                onAction={onAction}
-              />
-            )}
+        <div className="project-layout">
+          <div className="project-list">
+            {filtered.map(project => (
+              <button
+                type="button"
+                key={project.project_id}
+                className={project.project_id === selectedId ? 'project-row selected-project' : 'project-row'}
+                onClick={() => {
+                  selectProject(project.project_id)
+                }}
+              >
+                <strong>{project.name}</strong>
+                <small>
+                  {project.organization_name ?? project.organization_id} · r{project.revision} · {project.updated_at === undefined ? '' : formatDate(project.updated_at)}
+                </small>
+                <span className={`status status-${project.status}`}>{projectStatusLabel(project.status)}</span>
+              </button>
+            ))}
+            {filtered.length === 0 && <Empty text="当前筛选没有可见项目" />}
           </div>
-        )}
-      </div>
-    </section>
+          {selectedId !== undefined && (
+            <div className="detail-panel project-detail-panel">
+              {loadingDetail || detail === undefined ? (
+                <Loading />
+              ) : (
+                <ProjectDetail
+                  detail={detail}
+                  tab={tab}
+                  setTab={selectTab}
+                  name={name}
+                  description={description}
+                  onName={setName}
+                  onDescription={setDescription}
+                  onSave={() => void save()}
+                  onTransition={(action) => {
+                    transition(action)
+                  }}
+                  api={api}
+                  onAction={onAction}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+      {transitionAction !== undefined && (
+        <ConfirmDialog
+          title="确认项目操作"
+          message={transitionAction === 'activate' ? '确认激活该项目？' : '归档后项目不可恢复，确认归档？'}
+          busy={transitionBusy}
+          confirmLabel={transitionAction === 'activate' ? '确认激活' : '确认归档'}
+          onCancel={() => {
+            if (!transitionBusy) setTransitionAction(undefined)
+          }}
+          onConfirm={() => void confirmTransition()}
+        />
+      )}
+    </>
   )
 }
 
@@ -1361,17 +1744,7 @@ function ProjectDetail({
           </button>
         ))}
       </div>
-      {tab === 'overview' && (
-        <ProjectOverview
-          detail={detail}
-          name={name}
-          description={description}
-          onName={onName}
-          onDescription={onDescription}
-          onSave={onSave}
-          onTransition={onTransition}
-        />
-      )}
+      {tab === 'overview' && <ProjectOverview detail={detail} name={name} description={description} onName={onName} onDescription={onDescription} onSave={onSave} onTransition={onTransition} />}
       {tab === 'members' && <ProjectMembersTab detail={detail} api={api} onAction={onAction} />}
       {tab === 'assets' && <ProjectAssetsTab detail={detail} api={api} onAction={onAction} />}
       {tab === 'audit' && <ProjectAuditTab detail={detail} api={api} />}
@@ -1400,8 +1773,9 @@ function ProjectOverview({
   return (
     <div className="project-overview">
       <label>
-        项目名称
+        当前项目名称
         <input
+          aria-label="项目名称详情"
           value={name}
           disabled={archived}
           onChange={(event) => {
@@ -1491,8 +1865,12 @@ function ProjectMembersTab({
   const [members, setMembers] = useState<readonly AdminProjectMember[]>([])
   const [users, setUsers] = useState<readonly AdminUser[]>([])
   const [userId, setUserId] = useState('')
+  const [askConfirmation, confirmationDialog] = useConfirmDialog()
+  const loadGeneration = useRef(0)
   const load = async (): Promise<void> => {
+    const generation = ++loadGeneration.current
     const [memberResult, userResult] = await Promise.all([api.listProjectMembers(detail.project_id), api.listUsers(detail.organization_id)])
+    if (generation !== loadGeneration.current) return
     if (memberResult.ok) setMembers(memberResult.value)
     else onAction(memberResult, '读取项目成员失败')
     if (userResult.ok) setUsers(userResult.value)
@@ -1513,64 +1891,69 @@ function ProjectMembersTab({
     }
   }
   const remove = async (member: AdminProjectMember): Promise<void> => {
-    if (!window.confirm(`移除 ${member.display_name}？`)) return
+    if (archived) return
+    if (
+      !(await askConfirmation({
+        title: '确认项目成员操作',
+        message: `移除 ${member.display_name}？`,
+      }))
+    )
+      return
     const result = await api.removeProjectMember(detail.project_id, member.user_id, member.revision, crypto.randomUUID())
     onAction(result, '项目成员已移除')
     if (result.ok) await load()
   }
   return (
-    <div className="project-tab">
-      <h4>项目成员</h4>
-      {!archived && (
-        <div className="inline-create">
-          <select
-            aria-label="项目成员"
-            value={userId}
-            onChange={(event) => {
-              setUserId(event.target.value)
-            }}
-          >
-            <option value="">选择组织 member</option>
-            {users
-              .filter(
-                user =>
-                  user.global_role === 'member' &&
-                  user.memberships?.some(item => item.organization_id === detail.organization_id) &&
-                  !members.some(member => member.user_id === user.user_id && member.status === 'active'),
-              )
-              .map(user => (
-                <option key={user.user_id} value={user.user_id}>
-                  {user.display_name} · {user.username}
-                </option>
-              ))}
-          </select>
-          <button type="button" className="button primary" disabled={userId.length === 0} onClick={() => void add()}>
-            <Users size={14} />
-            添加成员
-          </button>
+    <>
+      <div className="project-tab">
+        <h4>项目成员</h4>
+        {!archived && (
+          <div className="inline-create">
+            <select
+              aria-label="项目成员"
+              value={userId}
+              onChange={(event) => {
+                setUserId(event.target.value)
+              }}
+            >
+              <option value="">选择组织 member</option>
+              {users
+                .filter(user => user.global_role === 'member' && user.memberships?.some(item => item.organization_id === detail.organization_id) && !members.some(member => member.user_id === user.user_id && member.status === 'active'))
+                .map(user => (
+                  <option key={user.user_id} value={user.user_id}>
+                    {user.display_name} · {user.username}
+                  </option>
+                ))}
+            </select>
+            <button type="button" className="button primary" disabled={userId.length === 0} onClick={() => void add()}>
+              <Users size={14} />
+              添加成员
+            </button>
+          </div>
+        )}
+        <div className="member-list">
+          {members
+            .filter(member => member.status === 'active')
+            .map(member => (
+              <div className="member-row" key={member.user_id}>
+                <span>
+                  <strong>{member.display_name}</strong>
+                  <small>
+                    {member.joined_at === undefined ? '' : formatDate(member.joined_at)} · r{member.revision}
+                  </small>
+                </span>
+                {!archived && (
+                  <button type="button" className="text-danger" onClick={() => void remove(member)}>
+                    移除
+                  </button>
+                )}
+              </div>
+            ))}
+          {members.filter(member => member.status === 'active').length === 0 && <Empty text="暂无项目成员" />}
         </div>
-      )}
-      <div className="member-list">
-        {members
-          .filter(member => member.status === 'active')
-          .map(member => (
-            <div className="member-row" key={member.user_id}>
-              <span>
-                <strong>{member.display_name}</strong>
-                <small>
-                  {member.joined_at === undefined ? '' : formatDate(member.joined_at)} · r{member.revision}
-                </small>
-              </span>
-              {!archived && (
-                <button type="button" className="text-danger" onClick={() => void remove(member)}>
-                  移除
-                </button>
-              )}
-            </div>
-          ))}
-        {members.filter(member => member.status === 'active').length === 0 && <Empty text="暂无项目成员" />}
       </div>
-    </div>
+      {confirmationDialog}
+    </>
   )
 }
 
@@ -1587,8 +1970,11 @@ function ProjectAssetsTab({
   const [assetType, setAssetType] = useState<AdminProjectAsset['asset_type']>('skill')
   const [assetId, setAssetId] = useState('')
   const [relation, setRelation] = useState<AdminProjectAsset['relation_kind']>('reference')
+  const loadGeneration = useRef(0)
   const load = async (): Promise<void> => {
+    const generation = ++loadGeneration.current
     const result = await api.listProjectAssets(detail.project_id)
+    if (generation !== loadGeneration.current) return
     if (result.ok) setAssets(result.value)
     else onAction(result, '读取项目资产失败')
   }
@@ -1600,7 +1986,12 @@ function ProjectAssetsTab({
     if (assetId.trim().length === 0) return
     const result = await api.addProjectAsset(
       detail.project_id,
-      { assetType, assetId: assetId.trim(), relationKind: relation, revision: detail.revision },
+      {
+        assetType,
+        assetId: assetId.trim(),
+        relationKind: relation,
+        revision: detail.revision,
+      },
       crypto.randomUUID(),
     )
     onAction(result, '资产关联已添加')
@@ -1610,14 +2001,7 @@ function ProjectAssetsTab({
     }
   }
   const update = async (asset: AdminProjectAsset): Promise<void> => {
-    const result = await api.updateProjectAsset(
-      detail.project_id,
-      asset.asset_type,
-      asset.asset_id,
-      asset.relation_kind === 'reference' ? 'context' : 'reference',
-      asset.revision,
-      crypto.randomUUID(),
-    )
+    const result = await api.updateProjectAsset(detail.project_id, asset.asset_type, asset.asset_id, asset.relation_kind === 'reference' ? 'context' : 'reference', asset.revision, crypto.randomUUID())
     onAction(result, '资产关系已更新')
     if (result.ok) await load()
   }
@@ -1747,7 +2131,9 @@ function ProjectsPage({
   const [members, setMembers] = useState<readonly AdminProjectMember[]>([])
   const [users, setUsers] = useState<readonly AdminUser[]>([])
   const [memberId, setMemberId] = useState('')
+  const [askConfirmation, confirmationDialog] = useConfirmDialog()
   const selected = items.find(item => item.project_id === selectedId)
+  const selectedArchived = selected?.status === 'archived'
   const refreshMembers = async (project: AdminProject | undefined): Promise<void> => {
     if (project === undefined) {
       setMembers([])
@@ -1766,7 +2152,7 @@ function ProjectsPage({
     void refreshMembers(selected)
   }, [selectedId, items])
   const add = async (): Promise<void> => {
-    if (selected === undefined || memberId.length === 0) return
+    if (selected === undefined || selectedArchived || memberId.length === 0) return
     const existing = members.find(member => member.user_id === memberId)
     const result = await api.setProjectMember(selected.project_id, memberId, existing?.revision ?? selected.revision, crypto.randomUUID())
     onAction(result, '项目成员已授权')
@@ -1776,92 +2162,102 @@ function ProjectsPage({
     }
   }
   const remove = async (member: AdminProjectMember): Promise<void> => {
-    if (selected === undefined || !window.confirm(`从项目移除 ${member.display_name}？`)) return
+    if (
+      selected === undefined ||
+      selectedArchived ||
+      !(await askConfirmation({
+        title: '确认项目成员操作',
+        message: `从项目移除 ${member.display_name}？`,
+      }))
+    )
+      return
     const result = await api.removeProjectMember(selected.project_id, member.user_id, member.revision, crypto.randomUUID())
     onAction(result, '项目成员已移除')
     if (result.ok) await refreshMembers(selected)
   }
   return (
-    <section className="page-body">
-      <div className="page-intro">
-        <div>
-          <span className="eyebrow">权限管理 / 项目</span>
-          <h2>项目授权</h2>
-          <p>{roleLabel(role)}只能在服务端允许的组织范围内调整项目成员关系。</p>
+    <>
+      <section className="page-body">
+        <div className="page-intro">
+          <div>
+            <span className="eyebrow">权限管理 / 项目</span>
+            <h2>项目授权</h2>
+            <p>{roleLabel(role)}只能在服务端允许的组织范围内调整项目成员关系。</p>
+          </div>
+          <span className="count-badge">{items.length} 个项目</span>
         </div>
-        <span className="count-badge">{items.length} 个项目</span>
-      </div>
-      <div className="project-layout">
-        <div className="project-list">
-          {items.map(project => (
-            <button
-              type="button"
-              key={project.project_id}
-              className={project.project_id === selectedId ? 'project-row selected-project' : 'project-row'}
-              onClick={() => {
-                setSelectedId(project.project_id)
-              }}
-            >
-              <strong>{project.name}</strong>
-              <small>
-                {project.organization_id} · r{project.revision}
-              </small>
-              <span className={`status status-${project.status}`}>{project.status === 'active' ? '正常' : '已归档'}</span>
-            </button>
-          ))}
-          {items.length === 0 && <Empty text="当前范围没有可见项目" />}
-        </div>
-        {selected !== undefined && (
-          <div className="detail-panel">
-            <span className="eyebrow">项目成员</span>
-            <h3>{selected.name}</h3>
-            <div className="inline-create">
-              <select
-                aria-label="选择组织成员"
-                value={memberId}
-                onChange={(event) => {
-                  setMemberId(event.target.value)
+        <div className="project-layout">
+          <div className="project-list">
+            {items.map(project => (
+              <button
+                type="button"
+                key={project.project_id}
+                className={project.project_id === selectedId ? 'project-row selected-project' : 'project-row'}
+                onClick={() => {
+                  setSelectedId(project.project_id)
                 }}
               >
-                <option value="">选择要授权的 member</option>
-                {users
-                  .filter(
-                    user =>
-                      user.global_role === 'member' &&
-                      user.memberships?.some(membership => membership.organization_id === selected.organization_id),
-                  )
-                  .filter(user => !members.some(member => member.user_id === user.user_id && member.status === 'active'))
-                  .map(user => (
-                    <option key={user.user_id} value={user.user_id}>
-                      {user.display_name} · {user.username}
-                    </option>
-                  ))}
-              </select>
-              <button type="button" className="button primary" disabled={memberId.length === 0} onClick={() => void add()}>
-                <Users size={14} />
-                授权
+                <strong>{project.name}</strong>
+                <small>
+                  {project.organization_id} · r{project.revision}
+                </small>
+                <span className={`status status-${project.status}`}>{projectStatusLabel(project.status)}</span>
               </button>
-            </div>
-            <div className="member-list">
-              {members
-                .filter(member => member.status === 'active')
-                .map(member => (
-                  <div className="member-row" key={member.user_id}>
-                    <span>
-                      <strong>{member.display_name}</strong>
-                      <small>r{member.revision}</small>
-                    </span>
-                    <button type="button" className="text-danger" onClick={() => void remove(member)}>
-                      移除
-                    </button>
-                  </div>
-                ))}
-              {members.filter(member => member.status === 'active').length === 0 && <Empty text="暂无项目成员" />}
-            </div>
+            ))}
+            {items.length === 0 && <Empty text="当前范围没有可见项目" />}
           </div>
-        )}
-      </div>
-    </section>
+          {selected !== undefined && (
+            <div className="detail-panel">
+              <span className="eyebrow">项目成员</span>
+              <h3>{selected.name}</h3>
+              {selectedArchived && <p className="page-hint">归档项目只读，不能调整成员授权。</p>}
+              <div className="inline-create">
+                <select
+                  aria-label="选择组织成员"
+                  value={memberId}
+                  onChange={(event) => {
+                    setMemberId(event.target.value)
+                  }}
+                >
+                  <option value="">选择要授权的 member</option>
+                  {users
+                    .filter(user => user.global_role === 'member' && user.memberships?.some(membership => membership.organization_id === selected.organization_id))
+                    .filter(user => !members.some(member => member.user_id === user.user_id && member.status === 'active'))
+                    .map(user => (
+                      <option key={user.user_id} value={user.user_id}>
+                        {user.display_name} · {user.username}
+                      </option>
+                    ))}
+                </select>
+                <button type="button" className="button primary" disabled={selectedArchived || memberId.length === 0} onClick={() => void add()}>
+                  <Users size={14} />
+                  授权
+                </button>
+              </div>
+              <div className="member-list">
+                {members
+                  .filter(member => member.status === 'active')
+                  .map(member => (
+                    <div className="member-row" key={member.user_id}>
+                      <span>
+                        <strong>{member.display_name}</strong>
+                        <small>r{member.revision}</small>
+                      </span>
+                      {!selectedArchived && (
+                        <button type="button" className="text-danger" onClick={() => void remove(member)}>
+                          移除
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                {members.filter(member => member.status === 'active').length === 0 && <Empty text="暂无项目成员" />}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+      {confirmationDialog}
+    </>
   )
 }
 
@@ -1959,7 +2355,8 @@ function ErrorState({ error, onRetry }: { error: ApiError; onRetry: () => void }
   return (
     <section className="state-panel error">
       <TriangleAlert size={20} />
-      <h2>{error.kind === 'not-ready' ? 'Skill 服务尚未配置' : error.kind === 'unauthorized' ? '登录已失效' : '服务请求失败'}</h2>
+      <h2>{error.kind === 'not-ready' ? 'Skill 服务尚未配置' : error.kind === 'unauthorized' ? '登录已失效' : error.kind === 'unavailable' ? '服务不可达' : '服务请求失败'}</h2>
+      {error.kind === 'unavailable' && <p>后端服务未启动或当前不可达</p>}
       <p>{errorMessage(error)}</p>
       <button className="button secondary" onClick={onRetry}>
         <RefreshCw size={15} />
@@ -2049,6 +2446,14 @@ function SkillSummary({ skill }: { skill: TeamSkill }) {
           <dd>{skill.runtimeName}</dd>
         </div>
         <div>
+          <dt>所属组织</dt>
+          <dd>{skill.organizationId ?? '未标注'}</dd>
+        </div>
+        <div>
+          <dt>项目绑定</dt>
+          <dd>{skill.projectIds === undefined || skill.projectIds.length === 0 ? '未绑定任何项目：发布后还需在项目资产中绑定，插件目录才会发现该 Skill' : skill.projectIds.join('、')}</dd>
+        </div>
+        <div>
           <dt>分类 / 标签</dt>
           <dd>
             {skill.category} · {skill.tags.join('、') || '未设置'}
@@ -2097,10 +2502,15 @@ function KnowledgeBasesPage({
   const [impact, setImpact] = useState<
     | {
       readonly revision: number
-      readonly affected_projects: readonly { readonly project_id: string; readonly name: string; readonly status: string }[]
+      readonly affected_projects: readonly {
+        readonly project_id: string
+        readonly name: string
+        readonly status: string
+      }[]
     }
     | undefined
   >()
+  const loadGeneration = useRef(0)
   useEffect(() => {
     void api.listOrganizations().then((result) => {
       if (result.ok) {
@@ -2110,7 +2520,9 @@ function KnowledgeBasesPage({
     })
   }, [api, organizationId.length])
   const load = async (id: string): Promise<void> => {
+    const generation = ++loadGeneration.current
     const [detail, docs] = await Promise.all([api.getKnowledgeBase(id), api.listKnowledgeDocuments(id)])
+    if (generation !== loadGeneration.current) return
     if (detail.ok) {
       setSelected(detail.value)
       setName(detail.value.name)
@@ -2123,14 +2535,7 @@ function KnowledgeBasesPage({
     if (selectedId !== undefined) void load(selectedId)
   }, [selectedId])
   useEffect(() => {
-    if (
-      operationId === undefined ||
-      operationStatus === undefined ||
-      operationStatus === 'succeeded' ||
-      operationStatus === 'failed' ||
-      operationStatus === 'cancelled'
-    )
-      return
+    if (operationId === undefined || operationStatus === undefined || operationStatus === 'succeeded' || operationStatus === 'failed' || operationStatus === 'cancelled') return
     const timer = window.setTimeout(() => {
       void api.getKnowledgeOperation(operationId).then((result) => {
         if (result.ok) setOperationStatus(result.value.status)
@@ -2168,12 +2573,7 @@ function KnowledgeBasesPage({
   }
   const importMarkdown = async (): Promise<void> => {
     if (selected === undefined || markdown.trim().length === 0) return
-    const result = await api.importKnowledgeMarkdown(
-      selected.knowledge_base_id,
-      { title: title.trim() || '未命名文档', markdown },
-      selected.revision,
-      crypto.randomUUID(),
-    )
+    const result = await api.importKnowledgeMarkdown(selected.knowledge_base_id, { title: title.trim() || '未命名文档', markdown }, selected.revision, crypto.randomUUID())
     onAction(result, 'Markdown 导入操作已提交')
     if (result.ok) {
       setOperationId(result.value.operation_id)
@@ -2216,8 +2616,9 @@ function KnowledgeBasesPage({
   }
   const loadImpact = async (): Promise<void> => {
     if (selected === undefined) return
+    const generation = loadGeneration.current
     const result = await api.getKnowledgeDeleteImpact(selected.knowledge_base_id)
-    if (result.ok) setImpact(result.value)
+    if (result.ok && generation === loadGeneration.current) setImpact(result.value)
     else onAction(result, '读取删除影响失败')
   }
   const deleteKnowledge = async (): Promise<void> => {
@@ -2234,7 +2635,11 @@ function KnowledgeBasesPage({
       setOperationStatus(result.value.status)
     }
   }
-  const tabs: Array<{ readonly id: typeof tab; readonly label: string; readonly visible: boolean }> = [
+  const tabs: Array<{
+    readonly id: typeof tab
+    readonly label: string
+    readonly visible: boolean
+  }> = [
     { id: 'overview', label: '概览', visible: true },
     { id: 'documents', label: '文档', visible: true },
     { id: 'faq', label: 'FAQ', visible: selected?.type === 'faq' },
@@ -2436,12 +2841,7 @@ function KnowledgeBasesPage({
                       setMarkdown(event.target.value)
                     }}
                   />
-                  <button
-                    type="button"
-                    className="button primary"
-                    onClick={() => void importMarkdown()}
-                    disabled={markdown.trim().length === 0}
-                  >
+                  <button type="button" className="button primary" onClick={() => void importMarkdown()} disabled={markdown.trim().length === 0}>
                     <Upload size={14} />
                     导入 Markdown
                   </button>
@@ -2469,12 +2869,7 @@ function KnowledgeBasesPage({
                       setFileName(event.target.value)
                     }}
                   />
-                  <button
-                    type="button"
-                    className="button primary"
-                    onClick={() => void importFile()}
-                    disabled={fileName.trim().length === 0}
-                  >
+                  <button type="button" className="button primary" onClick={() => void importFile()} disabled={fileName.trim().length === 0}>
                     <Upload size={14} />
                     导入文件
                   </button>
@@ -2602,7 +2997,6 @@ function MemoryLibraryPage({
 }) {
   const [projects, setProjects] = useState<readonly AdminProject[]>([])
   const [projectId, setProjectId] = useState('')
-  const [targetProjectId, setTargetProjectId] = useState('')
   const [keyword, setKeyword] = useState('')
   const [query, setQuery] = useState('')
   const [records, setRecords] = useState<readonly AdminMemoryRecord[]>(items)
@@ -2615,7 +3009,13 @@ function MemoryLibraryPage({
   const [policy, setPolicy] = useState<AdminMemoryPolicy | undefined>()
   const [jobs, setJobs] = useState<readonly AdminMemoryJob[]>([])
   const [audits, setAudits] = useState<readonly AdminMemoryAudit[]>([])
+  const [askConfirmation, confirmationDialog] = useConfirmDialog()
   const [busy, setBusy] = useState(false)
+  const [listError, setListError] = useState<string | undefined>()
+  const listRequest = useRef(0)
+  const detailRequest = useRef(0)
+  const governanceRequest = useRef(0)
+  const mutationRequest = useRef(0)
   const canWrite = role !== 'member'
   const canEdit = (record: AdminMemoryRecord): boolean => canWrite || record.captured_by_user_id === userId
 
@@ -2623,45 +3023,73 @@ function MemoryLibraryPage({
     void (role === 'member' ? api.listMemoryProjects() : api.listProjects()).then((result) => {
       if (result.ok) {
         setProjects(result.value)
-        if (projectId.length === 0 && result.value.length > 0) setProjectId(result.value[0].project_id)
+        setProjectId(current => (current.length === 0 ? result.value[0].project_id : current))
       } else onAction(result, '读取项目失败')
     })
   }, [api, onAction, projectId.length, role])
-  const loadRecords = async (next?: string): Promise<void> => {
+  const loadRecords = async (next?: string, search = query): Promise<void> => {
+    const requestId = ++listRequest.current
+    const requestedProjectId = projectId
     setBusy(true)
-    const result = await api.listMemoryRecords({ projectId: projectId || undefined, keyword: query || undefined, cursor: next })
+    setListError(undefined)
+    const result = await api.listMemoryRecords({
+      projectId: requestedProjectId || undefined,
+      keyword: search || undefined,
+      cursor: next,
+    })
+    if (requestId !== listRequest.current || requestedProjectId !== projectId) return
     setBusy(false)
     if (!result.ok) {
-      onAction(result, '读取记忆失败')
+      setListError(errorMessage(result.error))
       return
     }
     setRecords(result.value.items)
+    setListError(undefined)
     setNextCursor(result.value.next_cursor)
     setCursor(next)
   }
   useEffect(() => {
-    if (projectId.length > 0) void loadRecords()
+    listRequest.current += 1
+    detailRequest.current += 1
+    governanceRequest.current += 1
+    mutationRequest.current += 1
+    setRecords([])
+    setSelected(undefined)
+    setContent('')
+    setEditing(false)
+    setKeyword('')
+    setQuery('')
+    setCursor(undefined)
+    setNextCursor(null)
+    setPolicy(undefined)
+    setJobs([])
+    setAudits([])
+    if (projectId.length > 0) void loadRecords(undefined, '')
   }, [projectId])
   useEffect(() => {
     setRecords(items)
+    setListError(undefined)
   }, [items])
   const select = async (record: AdminMemoryRecord): Promise<void> => {
+    const requestId = ++detailRequest.current
     setSelected(record)
-    setTargetProjectId('')
     setContent(record.content)
     setEditing(false)
     const result = await api.getMemoryRecord(record.memory_id)
+    if (requestId !== detailRequest.current) return
     if (result.ok) {
       setSelected(result.value)
-      setTargetProjectId('')
       setContent(result.value.content)
     } else onAction(result, '读取记忆详情失败')
   }
   const save = async (): Promise<void> => {
     if (selected === undefined || !canEdit(selected)) return
+    const requestId = ++mutationRequest.current
+    const requestedProjectId = projectId
     setBusy(true)
     const result = await api.updateMemoryRecord(selected.memory_id, content, selected.revision)
     setBusy(false)
+    if (requestId !== mutationRequest.current || requestedProjectId !== projectId) return
     if (result.ok) {
       setSelected(result.value)
       setContent(result.value.content)
@@ -2671,10 +3099,22 @@ function MemoryLibraryPage({
     onAction(result, '记忆正文已保存')
   }
   const remove = async (): Promise<void> => {
-    if (selected === undefined || !canEdit(selected) || !window.confirm('删除后该记忆将立即不可召回，确认继续？')) return
+    if (
+      selected === undefined ||
+      !canEdit(selected) ||
+      !(await askConfirmation({
+        title: '确认删除记忆',
+        message: '删除后该记忆将立即不可召回，确认继续？',
+        confirmLabel: '确认删除',
+      }))
+    )
+      return
+    const requestId = ++mutationRequest.current
+    const requestedProjectId = projectId
     setBusy(true)
     const result = await api.deleteMemoryRecord(selected.memory_id, selected.revision, crypto.randomUUID())
     setBusy(false)
+    if (requestId !== mutationRequest.current || requestedProjectId !== projectId) return
     if (result.ok) {
       setSelected(undefined)
       setEditing(false)
@@ -2682,397 +3122,363 @@ function MemoryLibraryPage({
     }
     onAction(result, '记忆删除任务已提交')
   }
-  const move = async (): Promise<void> => {
-    if (
-      selected === undefined ||
-      !canWrite ||
-      targetProjectId.length === 0 ||
-      targetProjectId === selected.project_id ||
-      !window.confirm('调整项目范围后，该记忆将从当前项目移出并进入目标项目，确认继续？')
-    )
-      return
-    setBusy(true)
-    const result = await api.moveMemoryRecord(selected.memory_id, targetProjectId, selected.revision, crypto.randomUUID())
-    setBusy(false)
-    if (result.ok) {
-      setSelected(result.value)
-      setTargetProjectId('')
-      setContent(result.value.content)
-      setProjectId(result.value.project_id)
-      setEditing(false)
-    }
-    onAction(result, '记忆项目范围已调整')
-  }
   const loadGovernance = async (nextTab: typeof tab): Promise<void> => {
     setTab(nextTab)
+    const requestId = ++governanceRequest.current
+    const requestedProjectId = projectId
     if (nextTab === 'policy' && projectId) {
       const result = await api.getMemoryPolicy(projectId)
+      if (requestId !== governanceRequest.current || requestedProjectId !== projectId) return
       if (result.ok) setPolicy(result.value)
       else onAction(result, '读取记忆策略失败')
     }
     if (nextTab === 'jobs') {
       const result = await api.listMemoryJobs(projectId || undefined)
-      if (result.ok) setJobs(result.value)
+      if (requestId !== governanceRequest.current || requestedProjectId !== projectId) return
+      if (result.ok) setJobs(result.value.items)
       else onAction(result, '读取记忆任务失败')
     }
     if (nextTab === 'audit') {
       const result = await api.listMemoryAudit(projectId || undefined)
-      if (result.ok) setAudits(result.value)
+      if (requestId !== governanceRequest.current || requestedProjectId !== projectId) return
+      if (result.ok) setAudits(result.value.items)
       else onAction(result, '读取记忆审计失败')
     }
   }
   const savePolicy = async (): Promise<void> => {
     if (policy === undefined || !projectId) return
+    const requestId = ++governanceRequest.current
+    const requestedProjectId = projectId
     const result = await api.updateMemoryPolicy(projectId, policy.values, policy.revision, crypto.randomUUID())
+    if (requestId !== governanceRequest.current || requestedProjectId !== projectId) return
     if (result.ok) setPolicy(result.value)
     onAction(result, '记忆策略已保存')
   }
   const retry = async (job: AdminMemoryJob): Promise<void> => {
+    const requestId = ++governanceRequest.current
+    const requestedProjectId = projectId
     const result = await api.retryMemoryJob(job.job_id, job.revision, crypto.randomUUID())
+    if (requestId !== governanceRequest.current || requestedProjectId !== projectId) return
     if (result.ok) setJobs(previous => previous.map(item => (item.job_id === job.job_id ? result.value : item)))
     onAction(result, '记忆任务已重试')
   }
   return (
-    <section className="page-body">
-      <div className="page-intro">
-        <div>
-          <span className="eyebrow">记忆库管理 / team + project</span>
-          <h2>项目团队记忆库</h2>
-          <p>服务端是唯一事实源；记忆捕获、召回和治理都按项目授权范围执行。</p>
+    <>
+      <section className="page-body">
+        <div className="page-intro">
+          <div>
+            <span className="eyebrow">记忆库管理 / team + project</span>
+            <h2>项目团队记忆库</h2>
+            <p>服务端是唯一事实源；记忆捕获、召回和治理都按项目授权范围执行。</p>
+          </div>
+          <span className="count-badge">{records.length} 条</span>
         </div>
-        <span className="count-badge">{records.length} 条</span>
-      </div>
-      <div className="detail-tabs" role="tablist" aria-label="记忆库页签">
-        {(
-          [
-            ['list', '记忆列表'],
-            ['policy', '策略'],
-            ['jobs', '任务'],
-            ['audit', '审计'],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            type="button"
-            aria-selected={tab === id}
-            className={tab === id ? 'tab active' : 'tab'}
-            onClick={() => void loadGovernance(id)}
-            key={id}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {tab === 'list' && (
-        <>
-          <div className="account-toolbar">
-            <label>
-              项目
-              <select
-                aria-label="记忆项目"
-                value={projectId}
-                onChange={(event) => {
-                  setProjectId(event.target.value)
+        <div className="detail-tabs" role="tablist" aria-label="记忆库页签">
+          {(
+            [
+              ['list', '记忆列表'],
+              ['policy', '策略'],
+              ['jobs', '任务'],
+              ['audit', '审计'],
+            ] as const
+          ).map(([id, label]) => (
+            <button type="button" aria-selected={tab === id} className={tab === id ? 'tab active' : 'tab'} onClick={() => void loadGovernance(id)} key={id}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {tab === 'list' && (
+          <>
+            <div className="account-toolbar">
+              <label>
+                项目
+                <select
+                  aria-label="记忆项目"
+                  value={projectId}
+                  onChange={(event) => {
+                    setProjectId(event.target.value)
+                    setCursor(undefined)
+                  }}
+                >
+                  {projects.map(project => (
+                    <option key={project.project_id} value={project.project_id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <form
+                className="inline-create"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const nextQuery = keyword.trim()
+                  setQuery(nextQuery)
                   setCursor(undefined)
+                  void loadRecords(undefined, nextQuery)
                 }}
               >
-                {projects.map(project => (
-                  <option key={project.project_id} value={project.project_id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <form
-              className="inline-create"
-              onSubmit={(event) => {
-                event.preventDefault()
-                setQuery(keyword.trim())
-                setCursor(undefined)
-                void loadRecords()
-              }}
-            >
-              <input
-                aria-label="记忆关键词"
-                placeholder="关键词"
-                value={keyword}
-                onChange={(event) => {
-                  setKeyword(event.target.value)
-                }}
-              />
-              <button type="submit" className="button secondary" disabled={busy}>
-                <RefreshCw size={14} />
-                筛选
-              </button>
-            </form>
-          </div>
-          <div className="content-grid">
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>正文</th>
-                    <th>项目</th>
-                    <th>来源</th>
-                    <th>修订</th>
-                    <th>状态</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {records.map(record => (
-                    <tr
-                      key={record.memory_id}
-                      className={selected?.memory_id === record.memory_id ? 'selected-row' : undefined}
-                      onClick={() => void select(record)}
-                    >
-                      <td>
-                        <button type="button" className="table-link" aria-label={record.content}>
-                          {record.content}
-                        </button>
-                      </td>
-                      <td>{record.project_id}</td>
-                      <td>{record.captured_by_user_id}</td>
-                      <td>r{record.revision}</td>
-                      <td>
-                        <Status status={record.status.toLowerCase()} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {records.length === 0 && <Empty text="当前项目没有可见记忆" />}
-              <div className="pagination">
-                <button type="button" className="button secondary" disabled={!cursor || busy} onClick={() => void loadRecords()}>
-                  上一页
+                <input
+                  aria-label="记忆关键词"
+                  placeholder="关键词"
+                  value={keyword}
+                  onChange={(event) => {
+                    setKeyword(event.target.value)
+                  }}
+                />
+                <button type="submit" className="button secondary" disabled={busy}>
+                  <RefreshCw size={14} />
+                  筛选
                 </button>
-                <button
-                  type="button"
-                  className="button secondary"
-                  disabled={!nextCursor || busy}
-                  onClick={() => void loadRecords(nextCursor ?? undefined)}
-                >
-                  下一页
-                </button>
-              </div>
+              </form>
             </div>
-            {selected !== undefined && (
-              <aside className="detail-panel">
-                <div className="editor-heading">
-                  <div>
-                    <span className="eyebrow">记忆详情</span>
-                    <h3>{selected.memory_id}</h3>
+            <div className="content-grid">
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>正文</th>
+                      <th>项目</th>
+                      <th>来源</th>
+                      <th>修订</th>
+                      <th>状态</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map(record => (
+                      <tr key={record.memory_id} className={selected?.memory_id === record.memory_id ? 'selected-row' : undefined} onClick={() => void select(record)}>
+                        <td>
+                          <button type="button" className="table-link" aria-label={record.content}>
+                            {record.content}
+                          </button>
+                        </td>
+                        <td>{record.project_id}</td>
+                        <td>{record.captured_by_user_id}</td>
+                        <td>r{record.revision}</td>
+                        <td>
+                          <Status status={record.status.toLowerCase()} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {listError !== undefined ? (
+                  <div className="auth-error" role="alert">
+                    {listError}
                   </div>
-                  <span className="revision">r{selected.revision}</span>
-                </div>
-                <dl>
-                  <div>
-                    <dt>项目</dt>
-                    <dd>{selected.project_id}</dd>
-                  </div>
-                  <div>
-                    <dt>捕获者</dt>
-                    <dd>{selected.captured_by_user_id}</dd>
-                  </div>
-                  <div>
-                    <dt>召回次数</dt>
-                    <dd>{selected.recall_count}</dd>
-                  </div>
-                </dl>
-                <label>
-                  记忆正文
-                  <textarea
-                    aria-label="记忆正文"
-                    value={content}
-                    disabled={!editing || !canEdit(selected) || busy}
-                    onChange={(event) => {
-                      setContent(event.target.value)
-                    }}
-                  />
-                </label>
-                {canWrite && (
-                  <div className="memory-scope-editor">
-                    <label>
-                      目标项目
-                      <select
-                        aria-label="目标项目"
-                        value={targetProjectId}
-                        onChange={(event) => {
-                          setTargetProjectId(event.target.value)
-                        }}
-                        disabled={busy}
-                      >
-                        <option value="">选择目标项目</option>
-                        {projects
-                          .filter(project => project.project_id !== selected.project_id)
-                          .map(project => (
-                            <option key={project.project_id} value={project.project_id}>
-                              {project.name}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      className="button secondary"
-                      disabled={busy || targetProjectId.length === 0}
-                      onClick={() => void move()}
-                    >
-                      调整项目范围
-                    </button>
-                  </div>
+                ) : (
+                  records.length === 0 && <Empty text="当前项目没有可见记忆" />
                 )}
-                <div className="review-actions">
-                  {editing ? (
-                    <button
-                      type="button"
-                      className="button secondary"
-                      disabled={!canEdit(selected) || busy || content.trim().length === 0}
-                      onClick={() => void save()}
-                    >
-                      <Save size={14} />
-                      保存记忆
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="button secondary"
-                      disabled={!canEdit(selected) || busy}
-                      onClick={() => {
-                        setEditing(true)
-                      }}
-                    >
-                      <FilePenLine size={14} />
-                      编辑记忆
-                    </button>
-                  )}
-                  <button type="button" className="button danger" disabled={!canEdit(selected) || busy} onClick={() => void remove()}>
-                    删除记忆
+                <div className="pagination">
+                  <button type="button" className="button secondary" disabled={!cursor || busy} onClick={() => void loadRecords()}>
+                    上一页
+                  </button>
+                  <button type="button" className="button secondary" disabled={!nextCursor || busy} onClick={() => void loadRecords(nextCursor ?? undefined)}>
+                    下一页
                   </button>
                 </div>
-              </aside>
-            )}
-          </div>
-        </>
-      )}
-      {tab === 'policy' && (
-        <section className="editor-panel">
-          <div className="section-title">
-            <strong>记忆召回策略</strong>
-            {policy !== undefined && <span className="revision">r{policy.revision}</span>}
-          </div>
-          {policy === undefined ? (
-            <Loading />
-          ) : (
-            <>
-              <div className="form-columns">
-                <label>
-                  top_k
-                  <input
-                    type="number"
-                    min="1"
-                    max="8"
-                    value={policy.values.top_k}
-                    onChange={(event) => {
-                      setPolicy({ ...policy, values: { ...policy.values, top_k: Number(event.target.value) } })
-                    }}
-                  />
-                </label>
-                <label>
-                  relevance_threshold
-                  <input
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={policy.values.relevance_threshold}
-                    onChange={(event) => {
-                      setPolicy({ ...policy, values: { ...policy.values, relevance_threshold: Number(event.target.value) } })
-                    }}
-                  />
-                </label>
-                <label>
-                  token_budget
-                  <input
-                    type="number"
-                    min="1"
-                    value={policy.values.token_budget}
-                    onChange={(event) => {
-                      setPolicy({ ...policy, values: { ...policy.values, token_budget: Number(event.target.value) } })
-                    }}
-                  />
-                </label>
               </div>
-              <p>继承来源：{policy.inherited_from ?? '无'}</p>
-              <button type="button" className="button primary" disabled={!canWrite} onClick={() => void savePolicy()}>
-                <Save size={14} />
-                保存策略
-              </button>
-            </>
-          )}
-        </section>
-      )}
-      {tab === 'jobs' && (
-        <section className="table-wrap">
-          <h3>记忆处理任务</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>任务</th>
-                <th>类型</th>
-                <th>状态</th>
-                <th>错误</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map(job => (
-                <tr key={job.job_id}>
-                  <td>{job.job_id}</td>
-                  <td>{job.kind}</td>
-                  <td>{job.status}</td>
-                  <td>{job.error_code ?? '-'}</td>
-                  <td>
-                    {job.retryable && (
-                      <button type="button" className="button secondary" disabled={!canWrite} onClick={() => void retry(job)}>
-                        重试
+              {selected !== undefined && (
+                <aside className="detail-panel">
+                  <div className="editor-heading">
+                    <div>
+                      <span className="eyebrow">记忆详情</span>
+                      <h3>{selected.memory_id}</h3>
+                    </div>
+                    <span className="revision">r{selected.revision}</span>
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>项目</dt>
+                      <dd>{selected.project_id}</dd>
+                    </div>
+                    <div>
+                      <dt>捕获者</dt>
+                      <dd>{selected.captured_by_user_id}</dd>
+                    </div>
+                    <div>
+                      <dt>召回次数</dt>
+                      <dd>{selected.recall_count}</dd>
+                    </div>
+                  </dl>
+                  <label>
+                    记忆正文
+                    <textarea
+                      aria-label="记忆正文"
+                      value={content}
+                      disabled={!editing || !canEdit(selected) || busy}
+                      onChange={(event) => {
+                        setContent(event.target.value)
+                      }}
+                    />
+                  </label>
+                  <div className="review-actions">
+                    {editing ? (
+                      <button type="button" className="button secondary" disabled={!canEdit(selected) || busy || content.trim().length === 0} onClick={() => void save()}>
+                        <Save size={14} />
+                        保存记忆
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="button secondary"
+                        disabled={!canEdit(selected) || busy}
+                        onClick={() => {
+                          setEditing(true)
+                        }}
+                      >
+                        <FilePenLine size={14} />
+                        编辑记忆
                       </button>
                     )}
-                  </td>
+                    <button type="button" className="button danger" disabled={!canEdit(selected) || busy} onClick={() => void remove()}>
+                      删除记忆
+                    </button>
+                  </div>
+                </aside>
+              )}
+            </div>
+          </>
+        )}
+        {tab === 'policy' && (
+          <section className="editor-panel">
+            <div className="section-title">
+              <strong>记忆召回策略</strong>
+              {policy !== undefined && <span className="revision">r{policy.revision}</span>}
+            </div>
+            {policy === undefined ? (
+              <Loading />
+            ) : (
+              <>
+                <div className="form-columns">
+                  <label>
+                    top_k
+                    <input
+                      type="number"
+                      min="1"
+                      max="8"
+                      value={policy.values.top_k}
+                      onChange={(event) => {
+                        setPolicy({
+                          ...policy,
+                          values: {
+                            ...policy.values,
+                            top_k: Number(event.target.value),
+                          },
+                        })
+                      }}
+                    />
+                  </label>
+                  <label>
+                    relevance_threshold
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={policy.values.relevance_threshold}
+                      onChange={(event) => {
+                        setPolicy({
+                          ...policy,
+                          values: {
+                            ...policy.values,
+                            relevance_threshold: Number(event.target.value),
+                          },
+                        })
+                      }}
+                    />
+                  </label>
+                  <label>
+                    token_budget
+                    <input
+                      type="number"
+                      min="1"
+                      value={policy.values.token_budget}
+                      onChange={(event) => {
+                        setPolicy({
+                          ...policy,
+                          values: {
+                            ...policy.values,
+                            token_budget: Number(event.target.value),
+                          },
+                        })
+                      }}
+                    />
+                  </label>
+                </div>
+                <p>继承来源：{policy.inherited_from ?? '无'}</p>
+                <button type="button" className="button primary" disabled={!canWrite} onClick={() => void savePolicy()}>
+                  <Save size={14} />
+                  保存策略
+                </button>
+              </>
+            )}
+          </section>
+        )}
+        {tab === 'jobs' && (
+          <section className="table-wrap">
+            <h3>记忆处理任务</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>任务</th>
+                  <th>类型</th>
+                  <th>状态</th>
+                  <th>错误</th>
+                  <th>操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {jobs.length === 0 && <Empty text="暂无记忆处理任务" />}
-        </section>
-      )}
-      {tab === 'audit' && (
-        <section className="table-wrap">
-          <h3>记忆治理审计</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>操作</th>
-                <th>记忆</th>
-                <th>项目</th>
-                <th>操作者</th>
-                <th>结果</th>
-              </tr>
-            </thead>
-            <tbody>
-              {audits.map(audit => (
-                <tr key={audit.audit_id}>
-                  <td>{audit.operation}</td>
-                  <td>{audit.memory_id ?? '-'}</td>
-                  <td>{audit.project_id}</td>
-                  <td>{audit.operated_by_user_id}</td>
-                  <td>{audit.result}</td>
+              </thead>
+              <tbody>
+                {jobs.map(job => (
+                  <tr key={job.job_id}>
+                    <td>{job.job_id}</td>
+                    <td>{job.kind}</td>
+                    <td>{job.status}</td>
+                    <td>{job.error_code ?? '-'}</td>
+                    <td>
+                      {job.retryable && (
+                        <button type="button" className="button secondary" disabled={!canWrite} onClick={() => void retry(job)}>
+                          重试
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {jobs.length === 0 && <Empty text="暂无记忆处理任务" />}
+          </section>
+        )}
+        {tab === 'audit' && (
+          <section className="table-wrap">
+            <h3>记忆治理审计</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>操作</th>
+                  <th>记忆</th>
+                  <th>项目</th>
+                  <th>操作者</th>
+                  <th>结果</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {audits.length === 0 && <Empty text="暂无记忆治理审计" />}
-        </section>
-      )}
-    </section>
+              </thead>
+              <tbody>
+                {audits.map(audit => (
+                  <tr key={audit.audit_id}>
+                    <td>{audit.operation}</td>
+                    <td>{audit.memory_id ?? '-'}</td>
+                    <td>{audit.project_id}</td>
+                    <td>{audit.operated_by_user_id}</td>
+                    <td>{audit.result}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {audits.length === 0 && <Empty text="暂无记忆治理审计" />}
+          </section>
+        )}
+      </section>
+      {confirmationDialog}
+    </>
   )
 }
 
@@ -3150,12 +3556,7 @@ function DraftsPage({
             我的 Skill <span>{editable.length}</span>
           </div>
           {editable.map(item => (
-            <button
-              type="button"
-              className={selectedId === item.skillId ? 'draft-row selected-draft' : 'draft-row'}
-              key={item.skillId}
-              onClick={() => void loadDetail(item.skillId)}
-            >
+            <button type="button" className={selectedId === item.skillId ? 'draft-row selected-draft' : 'draft-row'} key={item.skillId} onClick={() => void loadDetail(item.skillId)}>
               <span>
                 <strong>{item.displayName}</strong>
                 <small>
@@ -3188,15 +3589,7 @@ function DraftsPage({
           onSubmit={() => void create()}
         />
       </div>
-      {selectedId !== undefined && (
-        <div className="draft-editor-wrap">
-          {detailLoading || detail === undefined ? (
-            <Loading />
-          ) : (
-            <DraftEditor detail={detail} api={api} onAction={onAction} onRefresh={() => loadDetail(selectedId)} />
-          )}
-        </div>
-      )}
+      {selectedId !== undefined && <div className="draft-editor-wrap">{detailLoading || detail === undefined ? <Loading /> : <DraftEditor detail={detail} api={api} onAction={onAction} onRefresh={() => loadDetail(selectedId)} />}</div>}
     </section>
   )
 }
@@ -3323,9 +3716,7 @@ function CreateSkillForm({
           </select>
         </label>
       )}
-      {visibility === 'people' && (
-        <PeopleSelector users={directoryUsers} selected={peopleIds} loading={directoryLoading} onChange={onPeopleIds} />
-      )}
+      {visibility === 'people' && <PeopleSelector users={directoryUsers} selected={peopleIds} loading={directoryLoading} onChange={onPeopleIds} />}
       <div className="form-note">版本说明、依赖、权限和 ZIP 制品将在创建后编辑；特定人员只能从服务端组织目录加入。</div>
       <button className="button primary" disabled={busy || name.trim().length === 0 || summary.trim().length === 0}>
         <Plus size={15} />
@@ -3341,7 +3732,10 @@ function DraftEditor({
   onAction,
   onRefresh,
 }: {
-  detail: { readonly skill: TeamSkill; readonly versions: readonly SkillVersion[] }
+  detail: {
+    readonly skill: TeamSkill
+    readonly versions: readonly SkillVersion[]
+  }
   api: TeamSkillApi
   onAction: (result: ApiResult<unknown>, message: string) => void
   onRefresh: () => Promise<void>
@@ -3437,7 +3831,11 @@ function DraftEditor({
         api.updateVersion(
           skill.skillId,
           draftVersion.version,
-          { releaseNotes, dependencies: splitLines(dependencies), permissions: splitLines(permissions) },
+          {
+            releaseNotes,
+            dependencies: splitLines(dependencies),
+            permissions: splitLines(permissions),
+          },
           draftVersion.revision,
           crypto.randomUUID(),
         ),
@@ -3446,21 +3844,10 @@ function DraftEditor({
   const upload = async (): Promise<void> => {
     if (draftVersion === undefined || file === undefined) return
     const bytes = new Uint8Array(await file.arrayBuffer())
-    await run(
-      'upload',
-      api.uploadArtifact(skill.skillId, draftVersion.version, bytes, draftVersion.revision, crypto.randomUUID()),
-      'ZIP 已上传并完成服务端校验',
-    )
+    await run('upload', api.uploadArtifact(skill.skillId, draftVersion.version, bytes, draftVersion.revision, crypto.randomUUID()), 'ZIP 已上传并完成服务端校验')
     setUploaded(true)
   }
-  const submit = (): Promise<void> =>
-    draftVersion === undefined || !uploaded
-      ? Promise.resolve()
-      : run(
-        'submit',
-        api.submitReview(skill.skillId, draftVersion.version, draftVersion.revision, skill.revision, crypto.randomUUID()),
-        '版本已提交审核',
-      )
+  const submit = (): Promise<void> => (draftVersion === undefined || !uploaded ? Promise.resolve() : run('submit', api.submitReview(skill.skillId, draftVersion.version, draftVersion.revision, skill.revision, crypto.randomUUID()), '版本已提交审核'))
   const createVersion = (): Promise<void> =>
     newVersion.trim().length === 0
       ? Promise.resolve()
@@ -3468,7 +3855,10 @@ function DraftEditor({
         'new-version',
         api.createVersion(
           skill.skillId,
-          { version: newVersion.trim(), releaseNotes: newReleaseNotes.trim() },
+          {
+            version: newVersion.trim(),
+            releaseNotes: newReleaseNotes.trim(),
+          },
           skill.revision,
           crypto.randomUUID(),
         ),
@@ -3561,9 +3951,7 @@ function DraftEditor({
             </select>
           </label>
         )}
-        {editable && visibility === 'people' && (
-          <PeopleSelector users={directoryUsers} selected={peopleIds} loading={directoryLoading} onChange={setPeopleIds} />
-        )}
+        {editable && visibility === 'people' && <PeopleSelector users={directoryUsers} selected={peopleIds} loading={directoryLoading} onChange={setPeopleIds} />}
         <button type="button" className="button secondary" disabled={!editable || busy !== undefined} onClick={() => void saveSkill()}>
           <Save size={14} />
           保存 Skill 信息
@@ -3598,12 +3986,7 @@ function DraftEditor({
               />
             </label>
           </div>
-          <button
-            type="button"
-            className="button primary"
-            disabled={busy !== undefined || newVersion.trim().length === 0}
-            onClick={() => void createVersion()}
-          >
+          <button type="button" className="button primary" disabled={busy !== undefined || newVersion.trim().length === 0} onClick={() => void createVersion()}>
             <Plus size={14} />
             创建版本草稿
           </button>
@@ -3659,11 +4042,7 @@ function DraftEditor({
           <div className="editor-section">
             <div className="section-title">
               <strong>平台托管制品</strong>
-              <span className="revision">
-                {draftVersion.artifactSizeBytes === undefined || draftVersion.artifactSizeBytes === 0
-                  ? '尚未上传'
-                  : `${draftVersion.artifactSizeBytes} bytes`}
-              </span>
+              <span className="revision">{draftVersion.artifactSizeBytes === undefined || draftVersion.artifactSizeBytes === 0 ? '尚未上传' : `${draftVersion.artifactSizeBytes} bytes`}</span>
             </div>
             <label>
               Skill ZIP
@@ -3685,12 +4064,7 @@ function DraftEditor({
                 </span>
               ))}
             </div>
-            <button
-              type="button"
-              className="button secondary"
-              disabled={busy !== undefined || file === undefined}
-              onClick={() => void upload()}
-            >
+            <button type="button" className="button secondary" disabled={busy !== undefined || file === undefined} onClick={() => void upload()}>
               <Upload size={14} />
               上传 ZIP
             </button>
@@ -3867,10 +4241,7 @@ function ReviewsPage({
               <span className="revision">r{current.version.revision}</span>
             </div>
             <ReviewBlock title="内容与文件" value={current.version.releaseNotes} />
-            <ReviewBlock
-              title="依赖与权限"
-              value={[...current.version.dependencies, ...current.version.permissions].join('、') || '未声明'}
-            />
+            <ReviewBlock title="依赖与权限" value={[...current.version.dependencies, ...current.version.permissions].join('、') || '未声明'} />
             <fieldset className="checks">
               <legend>人工审核清单</legend>
               {current.reviewChecks.map(check => (
@@ -3879,7 +4250,10 @@ function ReviewsPage({
                     type="checkbox"
                     checked={checks[check.id] === 'pass'}
                     onChange={(event) => {
-                      setChecks(previous => ({ ...previous, [check.id]: event.target.checked ? 'pass' : 'fail' }))
+                      setChecks(previous => ({
+                        ...previous,
+                        [check.id]: event.target.checked ? 'pass' : 'fail',
+                      }))
                     }}
                   />
                   {check.label}
@@ -3887,12 +4261,7 @@ function ReviewsPage({
               ))}
             </fieldset>
             <div className="review-actions">
-              <button
-                type="button"
-                className="button primary"
-                disabled={busy || current.reviewChecks.some(check => checks[check.id] !== 'pass')}
-                onClick={() => void approve()}
-              >
+              <button type="button" className="button primary" disabled={busy || current.reviewChecks.some(check => checks[check.id] !== 'pass')} onClick={() => void approve()}>
                 <ShieldCheck size={15} />
                 批准版本
               </button>
@@ -4020,6 +4389,43 @@ function ConfirmDialog({
   )
 }
 
+type ConfirmationRequest = {
+  readonly title: string
+  readonly message: string
+  readonly confirmLabel?: string
+}
+
+function useConfirmDialog(): readonly [(request: ConfirmationRequest) => Promise<boolean>, React.ReactNode] {
+  const [request, setRequest] = useState<(ConfirmationRequest & { readonly resolve: (value: boolean) => void }) | undefined>()
+  const ask = useCallback(
+    (next: ConfirmationRequest): Promise<boolean> =>
+      new Promise((resolve) => {
+        setRequest({ ...next, resolve })
+      }),
+    [],
+  )
+  const dialog =
+    request === undefined ? null : (
+      <ConfirmDialog
+        title={request.title}
+        message={request.message}
+        busy={false}
+        confirmLabel={request.confirmLabel ?? '确认'}
+        onCancel={() => {
+          const current = request
+          setRequest(undefined)
+          current.resolve(false)
+        }}
+        onConfirm={() => {
+          const current = request
+          setRequest(undefined)
+          current.resolve(true)
+        }}
+      />
+    )
+  return [ask, dialog]
+}
+
 function RollbackDialog({
   versions,
   current,
@@ -4084,7 +4490,13 @@ function ReleasesPage({
 }) {
   const governed = items.filter(item => item.status === 'approved' || item.status === 'published' || item.status === 'withdrawn')
   const [busyKey, setBusyKey] = useState<string | undefined>()
-  const [dialog, setDialog] = useState<{ readonly kind: 'publish' | 'withdraw' | 'rollback'; readonly item: TeamSkill } | undefined>()
+  const [dialog, setDialog] = useState<
+    | {
+      readonly kind: 'publish' | 'withdraw' | 'rollback'
+      readonly item: TeamSkill
+    }
+    | undefined
+  >()
   const [reason, setReason] = useState('')
   const [rollbackVersion, setRollbackVersion] = useState('')
 
@@ -4101,19 +4513,7 @@ function ReleasesPage({
     if (dialog.kind === 'withdraw' && reason.trim().length === 0) return
     if (dialog.kind === 'rollback' && rollbackVersion.length === 0) return
     setBusyKey(item.skillId)
-    const result =
-      dialog.kind === 'publish'
-        ? await api.publish(item.skillId, version, item.latestVersionRevision ?? item.revision, item.revision, crypto.randomUUID())
-        : dialog.kind === 'withdraw'
-          ? await api.withdraw(
-            item.skillId,
-            version,
-            reason.trim(),
-            item.latestVersionRevision ?? item.revision,
-            item.revision,
-            crypto.randomUUID(),
-          )
-          : await api.rollback(item.skillId, rollbackVersion, item.revision, crypto.randomUUID())
+    const result = dialog.kind === 'publish' ? await api.publish(item.skillId, version, item.latestVersionRevision ?? item.revision, item.revision, crypto.randomUUID()) : dialog.kind === 'withdraw' ? await api.withdraw(item.skillId, version, reason.trim(), item.latestVersionRevision ?? item.revision, item.revision, crypto.randomUUID()) : await api.rollback(item.skillId, rollbackVersion, item.revision, crypto.randomUUID())
     setBusyKey(undefined)
     if (result.ok) closeDialog()
     onAction(result, dialog.kind === 'publish' ? '版本已发布' : dialog.kind === 'withdraw' ? '版本已下线' : '已回滚到指定版本')
@@ -4182,39 +4582,9 @@ function ReleasesPage({
         })}
         {governed.length === 0 && <Empty text="没有可治理的已批准或已发布版本" />}
       </div>
-      {dialog !== undefined && dialog.kind === 'withdraw' && (
-        <ReasonDialog
-          title="下线版本"
-          label="下线原因"
-          value={reason}
-          busy={busyKey !== undefined}
-          confirmLabel="确认下线"
-          onChange={setReason}
-          onCancel={closeDialog}
-          onConfirm={() => void confirm()}
-        />
-      )}
-      {dialog !== undefined && dialog.kind === 'publish' && (
-        <ConfirmDialog
-          title="发布版本"
-          message={`确认发布 ${dialog.item.displayName} v${dialog.item.currentVersion ?? ''}？`}
-          busy={busyKey !== undefined}
-          confirmLabel="确认发布"
-          onCancel={closeDialog}
-          onConfirm={() => void confirm()}
-        />
-      )}
-      {dialog !== undefined && dialog.kind === 'rollback' && (
-        <RollbackDialog
-          versions={dialog.item.publishedVersions ?? []}
-          current={dialog.item.currentVersion}
-          value={rollbackVersion}
-          busy={busyKey !== undefined}
-          onChange={setRollbackVersion}
-          onCancel={closeDialog}
-          onConfirm={() => void confirm()}
-        />
-      )}
+      {dialog !== undefined && dialog.kind === 'withdraw' && <ReasonDialog title="下线版本" label="下线原因" value={reason} busy={busyKey !== undefined} confirmLabel="确认下线" onChange={setReason} onCancel={closeDialog} onConfirm={() => void confirm()} />}
+      {dialog !== undefined && dialog.kind === 'publish' && <ConfirmDialog title="发布版本" message={`确认发布 ${dialog.item.displayName} v${dialog.item.currentVersion ?? ''}？`} busy={busyKey !== undefined} confirmLabel="确认发布" onCancel={closeDialog} onConfirm={() => void confirm()} />}
+      {dialog !== undefined && dialog.kind === 'rollback' && <RollbackDialog versions={dialog.item.publishedVersions ?? []} current={dialog.item.currentVersion} value={rollbackVersion} busy={busyKey !== undefined} onChange={setRollbackVersion} onCancel={closeDialog} onConfirm={() => void confirm()} />}
     </section>
   )
 }
@@ -4246,7 +4616,7 @@ function AuditPage({ items }: { items: readonly AuditLogEntry[] }) {
             {items.map(item => (
               <tr key={item.id}>
                 <td>{formatDate(item.occurredAt)}</td>
-                <td>{item.actorName}</td>
+                <td>{item.actor_name}</td>
                 <td>{item.action}</td>
                 <td>
                   {item.skillName} · v{item.version}
@@ -4289,5 +4659,727 @@ function visibilityLabel(value: TeamSkill['visibility']): string {
   return value === 'organization' ? '所有人可见' : value === 'group' ? '本组内可见' : '特定人员可见'
 }
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
+  return new Intl.DateTimeFormat('zh-CN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value))
+}
+
+type TelemetryWindowState = { readonly state: 'loading' } | { readonly state: 'ready' } | { readonly state: 'empty' } | { readonly state: 'error'; readonly error: ApiError }
+
+function errorCode(error: ApiError): string {
+  return error.kind === 'not-ready' ? 'NOT_READY' : error.code
+}
+
+function telemetryWindowDefaults(): {
+  readonly from: string
+  readonly to: string
+} {
+  const to = new Date()
+  const from = new Date(to.getTime() - 24 * 60 * 60 * 1000)
+  return { from: from.toISOString(), to: to.toISOString() }
+}
+
+function formatTelemetryTime(value: string | null): string {
+  return value === null ? '—' : new Date(value).toLocaleString()
+}
+
+function formatDuration(value: number | null): string {
+  return value === null ? '—' : `${value} ms`
+}
+
+function formatTokens(value: number | null): string {
+  return value === null ? '缺失' : String(value)
+}
+
+/** Shared time-window filter row; requests always carry explicit UTC ISO bounds. */
+function TelemetryWindowBar({
+  from,
+  to,
+  onFrom,
+  onTo,
+  onRefresh,
+  busy,
+  children,
+}: {
+  readonly from: string
+  readonly to: string
+  readonly onFrom: (value: string) => void
+  readonly onTo: (value: string) => void
+  readonly onRefresh: () => void
+  readonly busy: boolean
+  readonly children?: React.ReactNode
+}) {
+  const localValue = (iso: string): string => {
+    const date = new Date(iso)
+    const pad = (input: number): string => String(input).padStart(2, '0')
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  }
+  return (
+    <div className="account-toolbar" role="search" aria-label="可观测筛选">
+      <label>
+        开始 (UTC)
+        <input
+          type="datetime-local"
+          value={localValue(from)}
+          onChange={(event) => {
+            const next = event.target.value
+            if (next.length > 0) onFrom(new Date(next).toISOString())
+          }}
+        />
+      </label>
+      <label>
+        结束 (UTC)
+        <input
+          type="datetime-local"
+          value={localValue(to)}
+          onChange={(event) => {
+            const next = event.target.value
+            if (next.length > 0) onTo(new Date(next).toISOString())
+          }}
+        />
+      </label>
+      {children}
+      <button className="button secondary" disabled={busy} onClick={onRefresh}>
+        <RefreshCw size={15} />
+        {busy ? '读取中…' : '刷新'}
+      </button>
+    </div>
+  )
+}
+
+function TelemetrySummaryCards({ summary }: { readonly summary: TelemetrySummary }) {
+  return (
+    <div className="form-columns" aria-label="运行摘要">
+      <section className="editor-section">
+        <h3 className="section-title">Session</h3>
+        <p>
+          总数 {summary.sessions.total} · 完成 {summary.sessions.completed} · 错误 {summary.sessions.errors} · 中断 {summary.sessions.interrupted} ·{' '}
+          取消 {summary.sessions.cancelled}
+        </p>
+      </section>
+      <section className="editor-section">
+        <h3 className="section-title">Turn</h3>
+        <p>
+          总数 {summary.turns.total} · 完成 {summary.turns.completed} · 错误 {summary.turns.errors} · 阻断 {summary.turns.blocked} · Token 上限 {summary.turns.max_tokens} · p50 {formatDuration(summary.turns.p50_duration_ms)} ·{' '}
+          p95 {formatDuration(summary.turns.p95_duration_ms)}
+        </p>
+      </section>
+      <section className="editor-section">
+        <h3 className="section-title">Step</h3>
+        <p>
+          开始 {summary.steps.started} · 结束 {summary.steps.finished} · p50 {formatDuration(summary.steps.p50_duration_ms)} ·{' '}
+          p95 {formatDuration(summary.steps.p95_duration_ms)}
+        </p>
+      </section>
+      <section className="editor-section">
+        <h3 className="section-title">模型与 Token</h3>
+        <p>
+          请求 {summary.llm.requests} · 重试 {summary.llm.retries} · 输入 {summary.llm.input_tokens} · 输出 {summary.llm.output_tokens} · 总 Token {formatTokens(summary.llm.total_tokens)} ·{' '}
+          Token 样本 {summary.llm.token_sample_size}
+        </p>
+      </section>
+      <section className="editor-section">
+        <h3 className="section-title">工具</h3>
+        <p>
+          调用 {summary.tools.calls} · 错误 {summary.tools.errors} · p50 {formatDuration(summary.tools.p50_duration_ms)} ·{' '}
+          p95 {formatDuration(summary.tools.p95_duration_ms)}
+        </p>
+      </section>
+      <section className="editor-section">
+        <h3 className="section-title">审批与压缩</h3>
+        <p>
+          审批 {summary.approvals.requested}（允许 {summary.approvals.allowed_once} · 拒绝 {summary.approvals.rejected} · 取消 {summary.approvals.cancelled} · 不可用{' '}
+          {summary.approvals.unavailable}）· 压缩 {summary.compactions}
+        </p>
+      </section>
+      <section className="editor-section">
+        <h3 className="section-title">采集管道</h3>
+        <p>
+          accepted {summary.delivery.accepted} · duplicate {summary.delivery.duplicate} · retryable {summary.delivery.retryable} · rejected {summary.delivery.rejected} ·{' '}
+          queued（fixture 恒为 0） {summary.delivery.queued} · 缺口 {summary.delivery.gaps}
+          {summary.delivery.gaps > 0 || summary.delivery.rejected > 0 ? '（存在丢弃、拒收或未上报数据）' : ''}
+        </p>
+      </section>
+      <section className="editor-section">
+        <h3 className="section-title">Token 说明</h3>
+        <p>仅统计服务端真实 Token 数量；缺失保持缺失，不计算成本或金额。</p>
+      </section>
+    </div>
+  )
+}
+
+function TelemetryWindowFilterError({ message }: { readonly message: string | undefined }) {
+  if (message === undefined) return null
+  return (
+    <div className="action-message" role="alert">
+      {message}
+    </div>
+  )
+}
+
+/** Overview page: role-visible aggregation and pipeline health for one window. */
+export function TelemetryOverviewPage({ api }: { readonly api: TeamSkillApi }) {
+  const initial = telemetryWindowDefaults()
+  const [from, setFrom] = useState(initial.from)
+  const [to, setTo] = useState(initial.to)
+  const [organizationId, setOrganizationId] = useState<string | undefined>()
+  const [projectId, setProjectId] = useState<string | undefined>()
+  const [projects, setProjects] = useState<readonly AdminProject[]>([])
+  const [state, setState] = useState<TelemetryWindowState>({
+    state: 'loading',
+  })
+  const [overview, setOverview] = useState<TelemetryOverview | undefined>()
+  const [busy, setBusy] = useState(false)
+  const [filterError, setFilterError] = useState<string | undefined>()
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | undefined>()
+  const requestSequence = useRef(0)
+
+  const load = async (): Promise<void> => {
+    const sequence = ++requestSequence.current
+    setBusy(true)
+    setFilterError(undefined)
+    const result = await api.getTelemetryOverview({
+      from,
+      to,
+      ...(organizationId === undefined ? {} : { organizationId }),
+      ...(projectId === undefined ? {} : { projectId }),
+    })
+    if (sequence !== requestSequence.current) return
+    setBusy(false)
+    if (!result.ok) {
+      if (errorCode(result.error) === 'INVALID_TIME_RANGE' || errorCode(result.error) === 'PROJECT_CONTEXT_MISMATCH') {
+        setFilterError(errorMessage(result.error))
+        return
+      }
+      setState({ state: 'error', error: result.error })
+      return
+    }
+    setLastLoadedAt(new Date().toLocaleString())
+    setOverview(result.value)
+    setState(result.value.has_data ? { state: 'ready' } : { state: 'empty' })
+  }
+
+  useEffect(() => {
+    void api.listProjects().then((result) => {
+      if (result.ok) setProjects(result.value)
+    })
+  }, [api])
+
+  useEffect(() => {
+    void load()
+  }, [from, to, organizationId, projectId])
+
+  return (
+    <div className="page-body">
+      <div className="page-intro">
+        <div>
+          <span className="eyebrow">AI CODING 可观测</span>
+          <h2>总览</h2>
+          <p>服务端按当前角色授权范围返回聚合；不合并未授权项目，不在浏览器计算 Token 或成本。</p>
+        </div>
+      </div>
+      <TelemetryWindowBar from={from} to={to} onFrom={setFrom} onTo={setTo} onRefresh={() => void load()} busy={busy}>
+        <label>
+          组织
+          <select
+            value={organizationId ?? ''}
+            onChange={(event) => {
+              setOrganizationId(event.target.value === '' ? undefined : event.target.value)
+              setProjectId(undefined)
+            }}
+          >
+            <option value="">全部授权组织</option>
+            {[...new Set(projects.map(project => `${project.organization_id}\u0000${project.organization_name}`))].map((pair) => {
+              const parts = pair.split('\u0000')
+              const id = parts[0] ?? ''
+              const name = parts[1] ?? id
+              return (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              )
+            })}
+          </select>
+        </label>
+        <label>
+          项目
+          <select
+            value={projectId ?? ''}
+            onChange={(event) => {
+              setProjectId(event.target.value === '' ? undefined : event.target.value)
+            }}
+          >
+            <option value="">全部授权项目</option>
+            {projects
+              .filter(project => organizationId === undefined || project.organization_id === organizationId)
+              .map(project => (
+                <option key={project.project_id} value={project.project_id}>
+                  {project.name}
+                </option>
+              ))}
+          </select>
+        </label>
+      </TelemetryWindowBar>
+      <TelemetryWindowFilterError message={filterError} />
+      {state.state === 'loading' && <Loading />}
+      {state.state === 'error' && <ErrorState error={state.error} onRetry={() => void load()} />}
+      {state.state === 'empty' && (
+        <section className="state-panel">
+          <h2>当前窗口没有数据</h2>
+          <p>
+            服务端确认空结果（has_data=false）
+            {lastLoadedAt === undefined ? '' : ` · 最近成功读取 ${lastLoadedAt}`}。
+          </p>
+        </section>
+      )}
+      {state.state === 'ready' && overview !== undefined && (
+        <>
+          <TelemetrySummaryCards summary={overview.summary} />
+          <section className="editor-section">
+            <h3 className="section-title">时间桶</h3>
+            {overview.buckets.length === 0 ? (
+              <p>当前窗口没有时间桶数据。</p>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <caption>按天聚合（保留 {overview.retention_days} 天原始事件；Token 缺失保持缺失，不计算成本）</caption>
+                  <thead>
+                    <tr>
+                      <th>桶起点 (UTC)</th>
+                      <th>Session</th>
+                      <th>Turn</th>
+                      <th>LLM 请求</th>
+                      <th>输入 Token</th>
+                      <th>输出 Token</th>
+                      <th>总 Token</th>
+                      <th>工具调用</th>
+                      <th>缺口</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.buckets.map((bucket: TelemetryBucket) => (
+                      <tr key={bucket.bucket_start}>
+                        <td>{bucket.bucket_start}</td>
+                        <td>{bucket.sessions.total}</td>
+                        <td>{bucket.turns.total}</td>
+                        <td>{bucket.llm.requests}</td>
+                        <td>{bucket.llm.input_tokens}</td>
+                        <td>{bucket.llm.output_tokens}</td>
+                        <td>{formatTokens(bucket.llm.total_tokens)}</td>
+                        <td>{bucket.tools.calls}</td>
+                        <td>{bucket.delivery.gaps}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Project page: one authorized project's runtime, token, tool, approval and pipeline summary. */
+export function TelemetryProjectPage({ api }: { readonly api: TeamSkillApi }) {
+  const initial = telemetryWindowDefaults()
+  const [from, setFrom] = useState(initial.from)
+  const [to, setTo] = useState(initial.to)
+  const [projects, setProjects] = useState<readonly AdminProject[]>([])
+  const [projectId, setProjectId] = useState<string | undefined>()
+  const [state, setState] = useState<TelemetryWindowState>({
+    state: 'loading',
+  })
+  const [summary, setSummary] = useState<TelemetryProjectSummary | undefined>()
+  const [busy, setBusy] = useState(false)
+  const [filterError, setFilterError] = useState<string | undefined>()
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | undefined>()
+  const requestSequence = useRef(0)
+
+  useEffect(() => {
+    void api.listProjects().then((result) => {
+      if (result.ok) setProjects(result.value)
+    })
+  }, [api])
+
+  const load = async (): Promise<void> => {
+    if (projectId === undefined) {
+      setState({ state: 'empty' })
+      return
+    }
+    const sequence = ++requestSequence.current
+    setBusy(true)
+    setFilterError(undefined)
+    const result = await api.getProjectTelemetrySummary(projectId, {
+      from,
+      to,
+    })
+    if (sequence !== requestSequence.current) return
+    setBusy(false)
+    if (!result.ok) {
+      if (errorCode(result.error) === 'INVALID_TIME_RANGE' || errorCode(result.error) === 'PROJECT_CONTEXT_MISMATCH') {
+        setFilterError(errorMessage(result.error))
+        return
+      }
+      setState({ state: 'error', error: result.error })
+      return
+    }
+    setLastLoadedAt(new Date().toLocaleString())
+    setSummary(result.value)
+    setState(result.value.has_data ? { state: 'ready' } : { state: 'empty' })
+  }
+
+  useEffect(() => {
+    void load()
+  }, [from, to, projectId])
+
+  return (
+    <div className="page-body">
+      <div className="page-intro">
+        <div>
+          <span className="eyebrow">AI CODING 可观测</span>
+          <h2>项目详情</h2>
+          <p>必须选择服务端授权的项目；项目失权后服务端返回 403/404，页面不会用旧数据替代。</p>
+        </div>
+      </div>
+      <TelemetryWindowBar from={from} to={to} onFrom={setFrom} onTo={setTo} onRefresh={() => void load()} busy={busy}>
+        <label>
+          项目
+          <select
+            value={projectId ?? ''}
+            aria-label="可观测项目"
+            onChange={(event) => {
+              setProjectId(event.target.value === '' ? undefined : event.target.value)
+            }}
+          >
+            <option value="">请选择授权项目</option>
+            {projects.map(project => (
+              <option key={project.project_id} value={project.project_id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </TelemetryWindowBar>
+      <TelemetryWindowFilterError message={filterError} />
+      {projectId === undefined && (
+        <section className="state-panel">
+          <h2>请先选择项目</h2>
+          <p>项目列表来自服务端授权；未授权项目不在候选中。</p>
+        </section>
+      )}
+      {projectId !== undefined && state.state === 'loading' && <Loading />}
+      {projectId !== undefined && state.state === 'error' && <ErrorState error={state.error} onRetry={() => void load()} />}
+      {projectId !== undefined && state.state === 'empty' && (
+        <section className="state-panel">
+          <h2>当前窗口没有数据</h2>
+          <p>
+            服务端确认空结果
+            {lastLoadedAt === undefined ? '' : ` · 最近成功读取 ${lastLoadedAt}`}。
+          </p>
+        </section>
+      )}
+      {projectId !== undefined && state.state === 'ready' && summary !== undefined && (
+        <>
+          <TelemetrySummaryCards summary={summary.summary} />
+          <section className="editor-section">
+            <h3 className="section-title">模型与 Token 分布</h3>
+            <div className="table-wrap">
+              <table>
+                <caption>未知 provider/model 显示为 unknown；缺失总 Token 保持缺失，不计算成本。</caption>
+                <thead>
+                  <tr>
+                    <th>Provider</th>
+                    <th>Model</th>
+                    <th>请求数</th>
+                    <th>输入 Token</th>
+                    <th>输出 Token</th>
+                    <th>总 Token</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.models.map((model: TelemetryModelUsage) => (
+                    <tr key={`${model.provider}:${model.model}`}>
+                      <td>{model.provider}</td>
+                      <td>{model.model}</td>
+                      <td>{model.requests}</td>
+                      <td>{model.input_tokens}</td>
+                      <td>{model.output_tokens}</td>
+                      <td>{formatTokens(model.total_tokens)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section className="editor-section">
+            <h3 className="section-title">工具分布</h3>
+            <div className="table-wrap">
+              <table>
+                <caption>只展示工具名与聚合；不显示工具参数或结果正文。</caption>
+                <thead>
+                  <tr>
+                    <th>工具</th>
+                    <th>调用量</th>
+                    <th>错误率</th>
+                    <th>p50</th>
+                    <th>p95</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.tools.map((tool: TelemetryToolUsage) => (
+                    <tr key={tool.tool_name}>
+                      <td>{tool.tool_name}</td>
+                      <td>{tool.calls}</td>
+                      <td>{tool.calls === 0 ? '—' : `${Math.round((tool.errors / tool.calls) * 100)}%`}</td>
+                      <td>{formatDuration(tool.p50_duration_ms)}</td>
+                      <td>{formatDuration(tool.p95_duration_ms)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  )
+}
+
+const TELEMETRY_KINDS: readonly string[] = ['session.started', 'session.finished', 'turn.started', 'turn.finished', 'step.started', 'step.finished', 'llm.request', 'llm.response', 'tool.call', 'tool.result', 'approval.requested', 'approval.resolved', 'compaction.completed', 'agent.error', 'delivery.gap']
+
+const TELEMETRY_OUTCOMES: readonly string[] = ['success', 'error', 'interrupted', 'cancelled', 'blocked', 'max_tokens']
+
+/** Events page: structured event diagnostics with opaque-cursor pagination. */
+export function TelemetryEventsPage({ api }: { readonly api: TeamSkillApi }) {
+  const initial = telemetryWindowDefaults()
+  const [from, setFrom] = useState(initial.from)
+  const [to, setTo] = useState(initial.to)
+  const [projects, setProjects] = useState<readonly AdminProject[]>([])
+  const [projectId, setProjectId] = useState<string | undefined>()
+  const [kind, setKind] = useState<string | undefined>()
+  const [outcome, setOutcome] = useState<string | undefined>()
+  const [page, setPage] = useState<TelemetryEventPage | undefined>()
+  const [state, setState] = useState<TelemetryWindowState>({
+    state: 'loading',
+  })
+  const [busy, setBusy] = useState(false)
+  const [filterError, setFilterError] = useState<string | undefined>()
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | undefined>()
+  const cursorStack = useRef<readonly string[]>([])
+  const requestSequence = useRef(0)
+
+  useEffect(() => {
+    void api.listProjects().then((result) => {
+      if (result.ok) setProjects(result.value)
+    })
+  }, [api])
+
+  const load = async (cursor?: string): Promise<void> => {
+    if (projectId === undefined) {
+      setState({ state: 'empty' })
+      return
+    }
+    const sequence = ++requestSequence.current
+    setBusy(true)
+    setFilterError(undefined)
+    const result = await api.listProjectTelemetryEvents(projectId, {
+      from,
+      to,
+      ...(kind === undefined ? {} : { kind }),
+      ...(outcome === undefined ? {} : { outcome }),
+      ...(cursor === undefined ? {} : { cursor }),
+      limit: 50,
+    })
+    if (sequence !== requestSequence.current) return
+    setBusy(false)
+    if (!result.ok) {
+      if (errorCode(result.error) === 'INVALID_CURSOR') {
+        // A stale or mismatched cursor resets to the first page instead of surfacing an error.
+        cursorStack.current = []
+        await load()
+        return
+      }
+      if (errorCode(result.error) === 'INVALID_TIME_RANGE' || errorCode(result.error) === 'PROJECT_CONTEXT_MISMATCH') {
+        setFilterError(errorMessage(result.error))
+        return
+      }
+      setState({ state: 'error', error: result.error })
+      return
+    }
+    setLastLoadedAt(new Date().toLocaleString())
+    setPage(result.value)
+    setState(result.value.items.length === 0 ? { state: 'empty' } : { state: 'ready' })
+  }
+
+  useEffect(() => {
+    cursorStack.current = []
+    void load()
+  }, [from, to, projectId, kind, outcome])
+
+  return (
+    <div className="page-body">
+      <div className="page-intro">
+        <div>
+          <span className="eyebrow">AI CODING 可观测</span>
+          <h2>事件诊断</h2>
+          <p>结构化事件查看器，不是会话记录浏览器；只显示服务端白名单字段和清洗后的错误摘要。</p>
+        </div>
+      </div>
+      <TelemetryWindowBar
+        from={from}
+        to={to}
+        onFrom={setFrom}
+        onTo={setTo}
+        onRefresh={() => {
+          cursorStack.current = []
+          void load()
+        }}
+        busy={busy}
+      >
+        <label>
+          项目
+          <select
+            value={projectId ?? ''}
+            aria-label="诊断项目"
+            onChange={(event) => {
+              setProjectId(event.target.value === '' ? undefined : event.target.value)
+            }}
+          >
+            <option value="">请选择授权项目</option>
+            {projects.map(project => (
+              <option key={project.project_id} value={project.project_id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          kind
+          <select
+            value={kind ?? ''}
+            onChange={(event) => {
+              setKind(event.target.value === '' ? undefined : event.target.value)
+            }}
+          >
+            <option value="">全部 kind</option>
+            {TELEMETRY_KINDS.map(option => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          outcome
+          <select
+            value={outcome ?? ''}
+            onChange={(event) => {
+              setOutcome(event.target.value === '' ? undefined : event.target.value)
+            }}
+          >
+            <option value="">全部 outcome</option>
+            {TELEMETRY_OUTCOMES.map(option => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+      </TelemetryWindowBar>
+      <TelemetryWindowFilterError message={filterError} />
+      {projectId === undefined && (
+        <section className="state-panel">
+          <h2>请先选择项目</h2>
+          <p>项目列表来自服务端授权；筛选变化会清空游标并从第一页读取。</p>
+        </section>
+      )}
+      {projectId !== undefined && state.state === 'loading' && <Loading />}
+      {projectId !== undefined && state.state === 'error' && <ErrorState error={state.error} onRetry={() => void load()} />}
+      {projectId !== undefined && state.state === 'empty' && (
+        <section className="state-panel">
+          <h2>没有匹配的结构化事件</h2>
+          <p>
+            服务端确认空结果
+            {lastLoadedAt === undefined ? '' : ` · 最近成功读取 ${lastLoadedAt}`}。
+          </p>
+        </section>
+      )}
+      {projectId !== undefined && page !== undefined && page.items.length > 0 && (
+        <section className="editor-section">
+          <h3 className="section-title">结构化事件（原始事件保留 {page.retention_days} 天；缺口事件用于解释不连续数据）</h3>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>发生时间</th>
+                  <th>接收时间</th>
+                  <th>kind</th>
+                  <th>session</th>
+                  <th>seq</th>
+                  <th>turn/step</th>
+                  <th>model</th>
+                  <th>工具</th>
+                  <th>耗时</th>
+                  <th>outcome</th>
+                  <th>Token (入/出/总)</th>
+                  <th>错误</th>
+                  <th>缺口</th>
+                </tr>
+              </thead>
+              <tbody>
+                {page.items.map((item: TelemetryEventItem) => (
+                  <tr key={item.event_id}>
+                    <td>{formatTelemetryTime(item.occurred_at)}</td>
+                    <td>{formatTelemetryTime(item.received_at)}</td>
+                    <td>{item.kind}</td>
+                    <td>{item.session_id ?? '—'}</td>
+                    <td>{item.source_seq ?? '—'}</td>
+                    <td>
+                      {item.turn ?? '—'}/{item.step ?? '—'}
+                    </td>
+                    <td>{item.model ?? '—'}</td>
+                    <td>{item.tool_name ?? '—'}</td>
+                    <td>{formatDuration(item.duration_ms)}</td>
+                    <td>{item.outcome ?? '—'}</td>
+                    <td>{item.token_usage === null ? '—' : `${formatTokens(item.token_usage.input_tokens)} / ${formatTokens(item.token_usage.output_tokens)} / ${formatTokens(item.token_usage.total_tokens)}`}</td>
+                    <td>{item.error === null ? '—' : `${item.error.name}${item.error.code === null ? '' : `/${item.error.code}`}${item.error.summary === null ? '' : ` · ${item.error.summary}`}`}</td>
+                    <td>{item.gap === null ? '—' : `${item.gap.reason} × ${item.gap.count}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="dialog-actions">
+            <button
+              className="button secondary"
+              disabled={busy || cursorStack.current.length === 0}
+              onClick={() => {
+                const stack = [...cursorStack.current]
+                const previous = stack.pop()
+                cursorStack.current = stack
+                if (previous !== undefined) void load(previous)
+              }}
+            >
+              上一页
+            </button>
+            <button
+              className="button secondary"
+              disabled={busy || !page.has_more || page.next_cursor === null}
+              onClick={() => {
+                if (page.next_cursor === null) return
+                cursorStack.current = [...cursorStack.current, page.next_cursor]
+                void load(page.next_cursor)
+              }}
+            >
+              下一页
+            </button>
+            <span className="request-id">opaque cursor 分页：浏览器不解析、排序或拼接游标。</span>
+          </div>
+        </section>
+      )}
+    </div>
+  )
 }

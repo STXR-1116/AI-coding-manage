@@ -31,7 +31,14 @@ const skill = {
 }
 
 function response(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
+  const record = typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+  const data = status < 400 && record !== undefined && Object.hasOwn(record, 'data') ? record.data : value
+  return new Response(JSON.stringify({
+    code: status >= 400 ? (typeof record?.code === 'string' ? record.code : `HTTP_${status}`) : 0,
+    message: status >= 400 ? (typeof record?.message === 'string' ? record.message : 'failed') : 'ok',
+    request_id: 'test-request',
+    data: status >= 400 ? null : data,
+  }), { status, headers: { 'content-type': 'application/json' } })
 }
 
 function configure(fetcher: typeof fetch): void {
@@ -175,63 +182,6 @@ describe('AdminDashboard', () => {
     expect(await screen.findByText('记忆治理审计')).toBeTruthy()
   })
 
-  it('moves a memory to another authorized project with revision and idempotency', async () => {
-    const memory = {
-      memory_id: 'm-1',
-      team_id: 'team-alpha',
-      project_id: 'project-alpha',
-      content: 'Move this project memory.',
-      layer: 'L1',
-      captured_by_user_id: 'member-1',
-      created_at: '2026-09-02T00:00:00Z',
-      updated_at: '2026-09-02T00:00:00Z',
-      revision: 3,
-      status: 'ACTIVE',
-      importance: 0.8,
-      recall_count: 0,
-      last_recalled_at: null,
-      source_kind: 'agent_turn',
-    }
-    const target = { project_id: 'project-beta', organization_id: 'org-alpha', name: 'Beta 项目', status: 'active', revision: 1 }
-    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
-      const url = String(input)
-      if (url.endsWith('/admin/projects'))
-        return response({
-          items: [{ project_id: 'project-alpha', organization_id: 'org-alpha', name: 'Alpha 项目', status: 'active', revision: 1 }, target],
-        })
-      if (url.endsWith('/project-memory/list')) return response({ data: { items: [memory], next_cursor: null, total_estimate: 1 } })
-      if (url.endsWith('/project-memory/get')) return response({ data: memory })
-      if (url.endsWith('/project-memory/scope/update') && init?.method === 'POST')
-        return response({ data: { memory: { ...memory, project_id: target.project_id, revision: 4 } } })
-      return response({ data: { items: [] } })
-    })
-    configure(fetcher)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    render(
-      React.createElement(AdminDashboard, {
-        session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false },
-      }),
-    )
-    fireEvent.click(await screen.findByRole('button', { name: /记忆库管理/ }))
-    fireEvent.click(await screen.findByRole('button', { name: /记忆列表、策略、任务与审计/ }))
-    fireEvent.click(await screen.findByRole('button', { name: /Move this project memory/ }))
-    const targetSelect = await screen.findByRole('combobox', { name: '目标项目' })
-    fireEvent.change(targetSelect, { target: { value: 'project-beta' } })
-    fireEvent.click(screen.getByRole('button', { name: '调整项目范围' }))
-    await waitFor(() => {
-      const call = fetcher.mock.calls.find(([url, _init]) => String(url).endsWith('/project-memory/scope/update'))
-      expect(call).toBeDefined()
-      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
-        memory_id: 'm-1',
-        target_project_id: 'project-beta',
-        expected_revision: 3,
-      })
-      expect(new Headers(call?.[1]?.headers).get('If-Match')).toBe('3')
-      expect(new Headers(call?.[1]?.headers).get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/u)
-    })
-    expect(await screen.findByText('project-beta')).toBeTruthy()
-  })
-
   it('shows a forbidden memory response instead of an empty list', async () => {
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
@@ -305,7 +255,7 @@ describe('AdminDashboard', () => {
     configure(fetcher)
     render(
       React.createElement(AdminDashboard, {
-        session: { user: { id: 'member-1', name: '成员' }, role: 'member', mustChangePassword: false },
+        session: { user: { id: 'admin-1', name: '管理员' }, role: 'admin', mustChangePassword: false },
       }),
     )
     fireEvent.click(await screen.findByRole('button', { name: /记忆库管理/ }))
@@ -320,7 +270,7 @@ describe('AdminDashboard', () => {
     expect(await screen.findByText('MEMORY_REVISION_CONFLICT：记忆已更新，请刷新后重试')).toBeTruthy()
   })
 
-  it('resolves a member project before requesting memory records', async () => {
+  it('resolves an authorized project before requesting memory records', async () => {
     const memory = {
       memory_id: 'm-1',
       team_id: 'team-alpha',
@@ -339,7 +289,7 @@ describe('AdminDashboard', () => {
     }
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
-      if (url.endsWith('/me/projects'))
+      if (url.endsWith('/admin/projects'))
         return response({
           items: [{ project_id: 'project-alpha', organization_id: 'org-alpha', name: 'Alpha 项目', status: 'active', revision: 1 }],
         })
@@ -350,14 +300,26 @@ describe('AdminDashboard', () => {
     configure(fetcher)
     render(
       React.createElement(AdminDashboard, {
-        session: { user: { id: 'member-1', name: '成员' }, role: 'member', mustChangePassword: false },
+        session: { user: { id: 'admin-1', name: '管理员' }, role: 'admin', mustChangePassword: false },
       }),
     )
     fireEvent.click(await screen.findByRole('button', { name: /记忆库管理/ }))
     fireEvent.click(await screen.findByRole('button', { name: /记忆列表、策略、任务与审计/ }))
     expect(await screen.findByText('成员项目记忆')).toBeTruthy()
-    const listCall = fetcher.mock.calls.find(([input]) => String(input).endsWith('/project-memory/list'))
+    const listCall = [...fetcher.mock.calls].reverse().find(([input]) => String(input).endsWith('/project-memory/list'))
     expect(JSON.parse(String(listCall?.[1]?.body))).toMatchObject({ project_id: 'project-alpha' })
+  })
+
+  it('hides the memory-library navigation from member sessions', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => response({ items: [] }))
+    configure(fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'member-1', name: '成员' }, role: 'member', mustChangePassword: false },
+      }),
+    )
+    expect(screen.queryByRole('button', { name: /记忆库管理/ })).toBeNull()
+    expect(fetcher.mock.calls.some(([input]) => String(input).includes('/project-memory/list'))).toBe(false)
   })
 
   it('expands only the selected primary navigation menu', async () => {
@@ -669,6 +631,162 @@ describe('AdminDashboard', () => {
     })
   })
 
+  it('clears the Auth.js session when a mutation reports token expiry', async () => {
+    const project = {
+      project_id: 'project-alpha',
+      organization_id: 'org-alpha',
+      organization_name: '星河 AI 平台',
+      name: '协作台前端',
+      description: '第一方项目',
+      status: 'active' as const,
+      created_by: 'admin-1',
+      created_at: '2026-08-30T00:00:00Z',
+      updated_at: '2026-08-30T00:00:00Z',
+      member_count: 0,
+      asset_count: 0,
+      revision: 1,
+    }
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/admin/projects/project-alpha') && method === 'PATCH') return response({ code: 'TOKEN_EXPIRED', message: '会话已失效' }, 401)
+      if (url.endsWith('/admin/projects/project-alpha')) return response(project)
+      if (url.endsWith('/admin/projects')) return response({ items: [project] })
+      if (url.includes('/admin/organizations')) return response({ items: [{ organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 }] })
+      if (url.includes('/admin/team-skills')) return response([])
+      return response({ items: [] })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /项目管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '项目列表项目资源与生命周期' }))
+    fireEvent.click(await screen.findByRole('button', { name: /协作台前端/ }))
+    await screen.findByRole('heading', { name: '协作台前端' })
+    fireEvent.change(screen.getByLabelText('项目名称详情'), { target: { value: '新名称' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存项目' }))
+    await waitFor(() => {
+      expect(signOut).toHaveBeenCalledWith({ redirect: true, redirectTo: '/' })
+    })
+  })
+
+  it('shows archived projects in permission management as read-only', async () => {
+    const active = { project_id: 'project-alpha', organization_id: 'org-alpha', name: '协作台前端', status: 'active' as const, revision: 1 }
+    const archived = { project_id: 'project-archived', organization_id: 'org-alpha', name: '归档项目', status: 'archived' as const, revision: 2 }
+    const user = {
+      user_id: 'member-1',
+      username: 'member@example.com',
+      email: 'member@example.com',
+      display_name: '演示成员',
+      status: 'active' as const,
+      global_role: 'member' as const,
+      must_change_password: false,
+      revision: 1,
+      memberships: [{ organization_id: 'org-alpha', organization_name: '星河 AI 平台', status: 'active' as const, revision: 1 }],
+    }
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.includes('/admin/projects?status=archived')) return response({ items: [archived] })
+      if (url.endsWith('/admin/projects')) return response({ items: [active] })
+      if (url.includes('/admin/projects/project-archived/members')) return response({ items: [{ project_id: 'project-archived', organization_id: 'org-alpha', user_id: 'member-1', display_name: '演示成员', status: 'active', revision: 1 }] })
+      if (url.includes('/admin/users')) return response({ items: [user] })
+      if (url.includes('/admin/organizations')) return response({ items: [{ organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 }] })
+      if (url.includes('/admin/team-skills')) return response([])
+      return response({ items: [] })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /权限管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '项目授权项目成员关系' }))
+    expect(await screen.findByRole('button', { name: /归档项目/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /归档项目/ }))
+    expect(await screen.findByText('归档项目只读，不能调整成员授权。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '授权' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.queryByRole('button', { name: '移除' })).toBeNull()
+    expect(fetcher.mock.calls.some(([input]) => String(input).includes('/admin/projects?status=archived'))).toBe(true)
+  })
+
+  it('fills role and scope labels when the service omits role descriptions', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.includes('/admin/roles')) return response({ items: [{ role: 'admin', scope: 'platform', description: '' }] })
+      if (url.includes('/admin/permissions')) return response({ items: [{ key: 'project.manage', admin: true, manager: 'organization', member: false }] })
+      if (url.includes('/admin/team-skills')) return response([])
+      return response({ items: [] })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /权限管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '角色与权限服务端固定矩阵' }))
+    expect(await screen.findByText('平台管理员')).toBeTruthy()
+    expect(screen.getAllByText('平台').length).toBeGreaterThan(0)
+    expect(screen.getByText('管理平台全部组织、账号和项目')).toBeTruthy()
+  })
+
+  it('distinguishes an unavailable service from an authorization failure', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      throw new TypeError('fetch failed')
+    })
+    vi.stubGlobal('fetch', fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    expect(await screen.findByRole('heading', { name: '服务不可达' })).toBeTruthy()
+    expect(screen.getByText('后端服务未启动或当前不可达')).toBeTruthy()
+  })
+
+  it('opens an in-app confirmation dialog before project lifecycle changes', async () => {
+    const project = {
+      project_id: 'project-alpha',
+      organization_id: 'org-alpha',
+      organization_name: '星河 AI 平台',
+      name: '协作台前端',
+      description: '第一方项目',
+      status: 'draft' as const,
+      created_by: 'admin-1',
+      created_at: '2026-08-30T00:00:00Z',
+      updated_at: '2026-08-30T00:00:00Z',
+      member_count: 0,
+      asset_count: 0,
+      revision: 1,
+    }
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/admin/projects')) return response({ items: [project] })
+      if (url.endsWith('/admin/projects/project-alpha')) return response(project)
+      if (url.includes('/members') || url.includes('/assets') || url.includes('/authorization-audits')) return response({ items: [] })
+      if (url.includes('/admin/organizations')) return response({ items: [{ organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 }] })
+      return response([])
+    })
+    vi.stubGlobal('fetch', fetcher)
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员', email: 'admin@example.com' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /项目管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '项目列表项目资源与生命周期' }))
+    fireEvent.click(await screen.findByRole('button', { name: /协作台前端/ }))
+    await screen.findByRole('heading', { name: '协作台前端' })
+    fireEvent.click(screen.getByRole('button', { name: '激活项目' }))
+    expect(screen.getByRole('dialog', { name: '确认项目操作' })).toBeTruthy()
+    expect(screen.getByText('确认激活该项目？')).toBeTruthy()
+    expect(fetcher.mock.calls.some(([input, init]) => String(input).includes(':activate') && init?.method === 'POST')).toBe(false)
+  })
+
   it('opens the account permission pages for an admin session and shows a one-time password', async () => {
     const user = {
       user_id: 'member-1',
@@ -704,7 +822,7 @@ describe('AdminDashboard', () => {
     fireEvent.change(screen.getByLabelText('新账号显示名'), { target: { value: '新成员' } })
     fireEvent.click(screen.getByRole('button', { name: '创建账号' }))
     expect(await screen.findByText('one-time-password')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /角色与权限/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '角色与权限服务端固定矩阵' }))
     expect(await screen.findByRole('heading', { name: '角色与权限' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '项目授权项目成员关系' }))
     expect(await screen.findByRole('heading', { name: '项目授权' })).toBeTruthy()
@@ -817,6 +935,8 @@ describe('AdminDashboard', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /协作台前端/ }))
     expect(await screen.findByRole('heading', { name: '协作台前端' })).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: '项目状态筛选' }).value).toBe('')
+    expect(screen.getAllByText('草稿').length).toBeGreaterThan(0)
     expect(screen.getByRole('tab', { name: '概览' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: '成员' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: '资产关联' })).toBeTruthy()
@@ -865,5 +985,169 @@ describe('AdminDashboard', () => {
     fireEvent.click(screen.getByRole('tab', { name: '资产关联' }))
     expect(window.location.pathname).toBe('/projects/project-alpha')
     expect(window.location.search).toBe('?tab=assets')
+  })
+
+  it('surfaces the server-side project binding state for published skills', async () => {
+    const unbound = {
+      ...skill,
+      skillId: 'skill-unbound',
+      displayName: '未绑定技能',
+      status: 'published' as const,
+      organizationId: 'org-alpha',
+      projectIds: [],
+    }
+    const bound = {
+      ...skill,
+      skillId: 'skill-bound',
+      displayName: '已绑定技能',
+      status: 'published' as const,
+      organizationId: 'org-alpha',
+      projectIds: ['project-alpha'],
+    }
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).includes('/admin/team-skills')) return response([unbound, bound])
+      return response([])
+    })
+    configure(fetcher)
+    // Earlier route tests leave a project URL behind; reset it so the skills nav group is expanded.
+    window.history.replaceState(null, '', '/')
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /Skill 目录/ }))
+    expect(await screen.findByText('未绑定技能')).toBeTruthy()
+
+    fireEvent.click(screen.getByText('未绑定技能'))
+    expect(
+      await screen.findByText('未绑定任何项目：发布后还需在项目资产中绑定，插件目录才会发现该 Skill'),
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByText('已绑定技能'))
+    await waitFor(() => {
+      const detail = screen.getAllByText('project-alpha')
+      expect(detail.length).toBeGreaterThan(0)
+    })
+  })
+
+  it('manages organization lifecycle and manager binding with revision and idempotency', async () => {
+    const organization = { organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active' as const, revision: 3 }
+    const manager = {
+      user_id: 'manager-2',
+      username: 'manager2@example.com',
+      email: 'manager2@example.com',
+      display_name: '候选经理',
+      status: 'active' as const,
+      global_role: 'manager' as const,
+      must_change_password: false,
+      revision: 1,
+      memberships: [],
+    }
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/admin/organizations') && method === 'POST')
+        return response({ organization_id: 'org-new', name: '新组织', status: 'active', revision: 1 }, 201)
+      if (url.endsWith('/admin/organizations/org-alpha') && method === 'PATCH')
+        return response({ ...organization, name: '改名后的组织', revision: 4 })
+      if (url.includes('/admin/organizations/org-alpha/members/manager-2') && method === 'PUT')
+        return response({ ...manager, memberships: [{ organization_id: 'org-alpha', organization_name: '星河 AI 平台', status: 'active', revision: 1 }] })
+      if (url.includes('/admin/users') && method === 'GET') return response({ items: [manager] })
+      if (url.includes('/admin/organizations')) return response({ items: [organization] })
+      if (url.includes('/admin/team-skills')) return response([])
+      return response({ items: [] })
+    })
+    configure(fetcher)
+    vi.spyOn(window, 'prompt').mockReturnValue('改名后的组织')
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /权限管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /组织管理/ }))
+    expect(await screen.findByRole('heading', { name: '组织管理' })).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText('新组织名称'), { target: { value: '新组织' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建组织' }))
+    await waitFor(() => {
+      const call = fetcher.mock.calls.find(([url, init]) => String(url).endsWith('/admin/organizations') && init?.method === 'POST')
+      expect(call).toBeDefined()
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ name: '新组织' })
+      expect(new Headers(call?.[1]?.headers).get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/u)
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: '重命名' }))
+    await waitFor(() => {
+      const call = fetcher.mock.calls.find(([url, init]) => String(url).endsWith('/admin/organizations/org-alpha') && init?.method === 'PATCH')
+      expect(call).toBeDefined()
+      expect(new Headers(call?.[1]?.headers).get('If-Match')).toBe('3')
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ name: '改名后的组织' })
+    })
+
+    fireEvent.change(screen.getByLabelText('为 星河 AI 平台 绑定经理'), { target: { value: 'manager-2' } })
+    fireEvent.click(screen.getByRole('button', { name: '绑定经理' }))
+    await waitFor(() => {
+      const call = fetcher.mock.calls.find(([url, init]) => String(url).includes('/members/manager-2') && init?.method === 'PUT')
+      expect(call).toBeDefined()
+      expect(new Headers(call?.[1]?.headers).get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/u)
+    })
+  })
+
+  it('edits a display name and adds an organization membership with revision and idempotency', async () => {
+    const user = {
+      user_id: 'user-7',
+      username: 'user7@example.com',
+      email: 'user7@example.com',
+      display_name: '待改名成员',
+      status: 'active' as const,
+      global_role: 'member' as const,
+      must_change_password: false,
+      revision: 5,
+      memberships: [{ organization_id: 'org-alpha', organization_name: '星河 AI 平台', status: 'active' as const, revision: 2 }],
+    }
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/admin/users/user-7') && method === 'PATCH') return response({ ...user, display_name: '新显示名', revision: 6 })
+      if (url.includes('/admin/organizations/org-beta/members/user-7') && method === 'PUT') return response(user)
+      if (url.includes('/admin/users') && method === 'GET') return response({ items: [user] })
+      if (url.includes('/admin/organizations'))
+        return response({
+          items: [
+            { organization_id: 'org-alpha', name: '星河 AI 平台', status: 'active', revision: 1 },
+            { organization_id: 'org-beta', name: '星河数据平台', status: 'active', revision: 1 },
+          ],
+        })
+      if (url.includes('/admin/team-skills')) return response([])
+      return response({ items: [] })
+    })
+    configure(fetcher)
+    vi.spyOn(window, 'prompt').mockReturnValue('新显示名')
+    render(
+      React.createElement(AdminDashboard, {
+        session: { user: { id: 'admin-1', name: '平台管理员' }, role: 'admin', mustChangePassword: false },
+      }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /权限管理/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /用户与成员/ }))
+    expect(await screen.findByText('待改名成员')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑显示名' }))
+    await waitFor(() => {
+      const call = fetcher.mock.calls.find(([url, init]) => String(url).endsWith('/admin/users/user-7') && init?.method === 'PATCH')
+      expect(call).toBeDefined()
+      expect(new Headers(call?.[1]?.headers).get('If-Match')).toBe('5')
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ display_name: '新显示名' })
+    })
+
+    fireEvent.change(screen.getByLabelText('为 待改名成员 新增组织'), { target: { value: 'org-beta' } })
+    fireEvent.click(screen.getByRole('button', { name: '新增组织成员' }))
+    await waitFor(() => {
+      const call = fetcher.mock.calls.find(([url, init]) => String(url).includes('/members/user-7') && init?.method === 'PUT')
+      expect(call).toBeDefined()
+      expect(new Headers(call?.[1]?.headers).get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/u)
+    })
   })
 })
